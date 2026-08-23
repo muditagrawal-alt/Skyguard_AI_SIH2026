@@ -74,11 +74,16 @@ class SkyGuardPipeline:
             }
 
         # 2. Streaming Statistical Filter Check
+        # Pass None through untouched during packet loss: StatisticalEngine.process()
+        # already skips updating its EWMA/CUSUM baselines for None sensors. Substituting
+        # generic defaults here would otherwise corrupt station-specific baselines (e.g.
+        # a ~785 hPa mountain station or ~34C desert station) with a fake 25C/1000hPa/60%
+        # reading every time a packet drops.
         stat_res = statistical_engine.process(
             station_id=station_id,
-            temp_c=temp if temp is not None else 25.0,
-            pressure_hpa=pres if pres is not None else 1000.0,
-            humidity_pct=hum if hum is not None else 60.0
+            temp_c=temp,
+            pressure_hpa=pres,
+            humidity_pct=hum
         )
 
         # 3. Multivariate Isolation Forest Outlier Scoring
