@@ -20,7 +20,15 @@ class AdaptiveRollingBaseline:
         self.count = 0
         self.warmup_steps = warmup_steps
 
-    def update(self, x: float) -> tuple:
+    def update(self, x: float, time_scale: float = 1.0) -> tuple:
+        """
+        `time_scale` inflates the effective std_dev for longer inter-sample gaps
+        (see StatisticalEngine.process()): the raw variance estimate self.var adapts
+        to whatever step size it's fed, but that takes many samples to converge, and
+        the z-score comparison is meaningless until it does. Pre-scaling makes a
+        single step's expected variability proportional to elapsed time immediately,
+        without waiting on convergence.
+        """
         self.count += 1
         if self.mean is None:
             self.mean = x
@@ -31,7 +39,7 @@ class AdaptiveRollingBaseline:
         diff = x - self.mean
         self.mean += self.alpha * diff
         self.var = max(0.25, (1.0 - self.alpha) * (self.var + self.alpha * (diff ** 2)))
-        std_dev = math.sqrt(self.var)
+        std_dev = math.sqrt(self.var) * max(1.0, time_scale)
 
         if self.count < self.warmup_steps or std_dev < 0.2:
             z_score = 0.0
@@ -128,9 +136,27 @@ class StatisticalEngine:
                 "humidity": CUSUMDetector()
             }
 
-    def process(self, station_id: str, temp_c: Optional[float], pressure_hpa: Optional[float], humidity_pct: Optional[float]) -> Dict[str, Any]:
+    def process(
+        self, station_id: str, temp_c: Optional[float], pressure_hpa: Optional[float],
+        humidity_pct: Optional[float], dt_seconds: float = 60.0
+    ) -> Dict[str, Any]:
+        """
+        `dt_seconds`: elapsed time since the previous reading. Every synthetic-path
+        caller (tests, benchmark, UI, API) passes dt_seconds=1.0 regardless of the
+        diurnal clock's own "1 step = 1 simulated minute" convention -- that's the
+        actual value this filter's alpha/CUSUM k/h were implicitly tuned against, so
+        1.0 (not 60.0) is the correct no-scaling reference point. Real NOAA data
+        reports roughly hourly (dt_seconds ~ 3600), 3600x sparser -- ordinary
+        atmospheric variability over that much longer real-world gap would otherwise
+        look like a sustained statistical shock every time, when it's just normal
+        weather at a coarser sampling rate. `time_scale` inflates the effective
+        std_dev proportionally (sqrt of the interval ratio, treating short-term
+        atmospheric noise as roughly diffusive) so a given raw deviation is judged
+        against the variability actually expected over THIS interval.
+        """
         self._init_station(station_id)
-        
+        time_scale = math.sqrt(max(dt_seconds, 1.0) / 1.0)
+
         readings = {
             "temperature": temp_c,
             "pressure": pressure_hpa,
@@ -154,7 +180,7 @@ class StatisticalEngine:
                 flatline_flags.append(f"{sensor.capitalize()} sensor flatline / invariant float detected")
 
             # Update Adaptive Baseline
-            mean, std, z = self.baselines[station_id][sensor].update(val)
+            mean, std, z = self.baselines[station_id][sensor].update(val, time_scale=time_scale)
             z_scores[sensor] = z
 
             # Update CUSUM

@@ -125,7 +125,8 @@ class SkyGuardPipeline:
             station_id=station_id,
             temp_c=temp,
             pressure_hpa=pres,
-            humidity_pct=hum
+            humidity_pct=hum,
+            dt_seconds=dt_seconds
         )
 
         # 3. Multivariate Isolation Forest Outlier Scoring
