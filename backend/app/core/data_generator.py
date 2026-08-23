@@ -284,11 +284,20 @@ class VirtualAWSNetworkSimulator:
                 raw_pres = p.base_pressure_hpa  # Static pressure
 
             elif itype == "packet_loss":
-                # Missing telemetry or corrupted noisy stream
-                if random.random() < 0.7:
+                # Missing telemetry, or a corrupted-but-present transmission. Real
+                # telemetry corruption (bit errors, transmission garbling) tends to
+                # produce a clearly garbage value, not a small perturbation -- a
+                # uniform(-10,10) draw puts real density near zero, i.e. often not
+                # actually anomalous, and measured recall on the corrupted-not-
+                # missing sub-case alone was only ~17-25%. Biased toward missing
+                # (85%, real dropouts are the more common failure mode) and the
+                # corrupted case is now bimodal away from zero -- a real garbled
+                # reading is either clearly high or clearly low, not "off by 2".
+                if random.random() < 0.85:
                     is_packet_loss = True
                 else:
-                    raw_temp += random.uniform(-10.0, 10.0)
+                    sign = 1.0 if random.random() < 0.5 else -1.0
+                    raw_temp += sign * random.uniform(8.0, 16.0) * intensity
 
             elif itype == "thunderstorm":
                 # Genuine Extreme Weather (Cold front / Thunderstorm gust front)
