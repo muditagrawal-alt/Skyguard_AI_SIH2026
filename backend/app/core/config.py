@@ -122,8 +122,8 @@ class SystemConfig(BaseModel):
     }
 
     # Anomaly Ensemble Weights
-    weight_physics: float = 0.35
-    weight_autoencoder: float = 0.25
+    weight_physics: float = 0.45
+    weight_autoencoder: float = 0.15
     weight_isolation_forest: float = 0.20
     weight_statistical_zscore: float = 0.20
 
