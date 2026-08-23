@@ -25,7 +25,7 @@ from datetime import datetime
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import numpy as np
-from sklearn.metrics import precision_score, recall_score, f1_score
+from sklearn.metrics import precision_score, recall_score, f1_score, roc_auc_score
 
 from backend.app.core.config import config
 from backend.app.core.data_generator import VirtualAWSNetworkSimulator, AnomalyInjectionRequest
@@ -47,21 +47,34 @@ def score_all(y_true, component_scores):
     results = {}
     for name, scores in component_scores.items():
         y_pred = [1 if s >= THRESH else 0 for s in scores]
+        # AUC is threshold-FREE: it measures how much discriminative information a
+        # component's raw score carries, independent of where the cutoff sits. This
+        # is what separates "this model carries no signal, a better model would help"
+        # (AUC near 0.5) from "this model has signal but the threshold/calibration is
+        # wrong" (high AUC, low F1) -- a distinction precision/recall/F1 at a single
+        # fixed threshold cannot make, and the one that actually decides whether
+        # swapping model architectures is worth the effort.
+        try:
+            auc = roc_auc_score(y_true, scores) * 100
+        except ValueError:
+            auc = float("nan")  # only one class present
         results[name] = {
             "precision": precision_score(y_true, y_pred, zero_division=0) * 100,
             "recall": recall_score(y_true, y_pred, zero_division=0) * 100,
             "f1": f1_score(y_true, y_pred, zero_division=0) * 100,
+            "auc": auc,
         }
     return results
 
 
 def print_table(title, results):
     print(f"\n{title}")
-    print(f"{'Component':<28} {'Precision':>10} {'Recall':>10} {'F1':>10}")
-    print("-" * 60)
+    print(f"{'Component':<28} {'Precision':>10} {'Recall':>10} {'F1':>10} {'AUC':>10}")
+    print("-" * 72)
     for name, m in results.items():
         marker = " <-- combined" if "ensemble" in name else ""
-        print(f"{name:<28} {m['precision']:>9.1f}% {m['recall']:>9.1f}% {m['f1']:>9.1f}%{marker}")
+        print(f"{name:<28} {m['precision']:>9.1f}% {m['recall']:>9.1f}% "
+              f"{m['f1']:>9.1f}% {m['auc']:>9.1f}%{marker}")
 
 
 def run_synthetic(seed: int):
@@ -103,7 +116,7 @@ def run_synthetic(seed: int):
             for name, fn in COMPONENTS.items():
                 component_scores[name].append(fn(res))
 
-    return score_all(y_true, component_scores), len(y_true)
+    return score_all(y_true, component_scores), len(y_true), y_true, component_scores
 
 
 def run_real_data(seed: int):
@@ -112,7 +125,7 @@ def run_real_data(seed: int):
     real_dir = Path(__file__).resolve().parent.parent / "data" / "real_stations" / "processed"
     if not real_dir.is_dir() or not any(real_dir.glob("*.csv")):
         print("[SKIP] No real station data found -- run data/real_stations/fetch_and_process.py")
-        return None, 0
+        return None, 0, [], {}
 
     injection_cycle = [
         {"type": None, "steps": 80},
@@ -183,7 +196,7 @@ def run_real_data(seed: int):
                 prev_dt = r["_dt"]
                 cursor += 1
 
-    return score_all(y_true, component_scores), len(y_true)
+    return score_all(y_true, component_scores), len(y_true), y_true, component_scores
 
 
 if __name__ == "__main__":
@@ -196,9 +209,9 @@ if __name__ == "__main__":
     print(f"   (threshold={THRESH}, seed={args.seed})")
     print("=" * 70)
 
-    synth_results, synth_n = run_synthetic(args.seed)
+    synth_results, synth_n, _, _ = run_synthetic(args.seed)
     print_table(f"Synthetic generator ({synth_n} observations)", synth_results)
 
-    real_results, real_n = run_real_data(args.seed)
+    real_results, real_n, _, _ = run_real_data(args.seed)
     if real_results:
         print_table(f"\nReal NOAA history ({real_n} observations)", real_results)
