@@ -1,6 +1,6 @@
 # SkyGuard AI — Genuine SHAP Explainability Report
 
-**Generated**: 2026-08-23 18:30:12
+**Generated**: 2026-08-23 18:50:07
 **Explainer**: `shap.KernelExplainer` over the Isolation Forest's `decision_function`
 **Background**: 100 real NOAA ISD-Lite observations, reduced to 20 kmeans centroids
 **Points explained**: 14
