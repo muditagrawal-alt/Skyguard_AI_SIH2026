@@ -4,10 +4,15 @@ Uses a PyTorch Autoencoder with local relative normalization to model temporal d
 across Temperature, Pressure, and Humidity. Flags anomalies based on trajectory reconstruction error.
 """
 
+import csv
+from pathlib import Path
+
 import torch
 import torch.nn as nn
 import numpy as np
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
+
+REAL_DATA_DIR = Path(__file__).resolve().parents[3] / "data" / "real_stations" / "processed"
 
 
 class TemporalAutoencoderNN(nn.Module):
@@ -50,31 +55,100 @@ class TemporalAutoencoder:
         self.is_trained = False
         self._quick_train_baseline()
 
+    def _load_real_windows(self, max_windows: int = 600) -> Optional[np.ndarray]:
+        """
+        Builds locally-normalized [seq_len x 3] training windows from real NOAA
+        ISD-Lite observations (see data/real_stations/), using the identical local
+        mean/std normalization score_sequence() applies at inference time so the
+        training distribution matches what the model actually sees in production.
+        Windows spanning a timestamp gap > 4h (a dropped/missing real observation)
+        are skipped so the model isn't taught that a big jump is a normal trajectory.
+        Returns None if no processed real data is available.
+        """
+        if not REAL_DATA_DIR.is_dir():
+            return None
+
+        from datetime import datetime
+
+        all_windows = []
+        for csv_path in sorted(REAL_DATA_DIR.glob("*.csv")):
+            with open(csv_path, newline="") as f:
+                station_rows = list(csv.DictReader(f))
+            if len(station_rows) < self.seq_len:
+                continue
+
+            times = [datetime.fromisoformat(r["timestamp"]) for r in station_rows]
+            temps = [float(r["temperature_c"]) for r in station_rows]
+            press = [float(r["pressure_hpa"]) for r in station_rows]
+            hums = [float(r["humidity_pct"]) for r in station_rows]
+
+            stride = 4  # overlapping windows every 4 hours keeps the dataset diverse but bounded
+            for start in range(0, len(station_rows) - self.seq_len, stride):
+                window_times = times[start:start + self.seq_len]
+                gaps_hours = [
+                    (window_times[i + 1] - window_times[i]).total_seconds() / 3600.0
+                    for i in range(len(window_times) - 1)
+                ]
+                if max(gaps_hours) > 4.0:
+                    continue
+                window = np.array([
+                    temps[start:start + self.seq_len],
+                    press[start:start + self.seq_len],
+                    hums[start:start + self.seq_len],
+                ]).T
+                all_windows.append(window)
+
+        if not all_windows:
+            return None
+
+        rng = np.random.RandomState(42)
+        if len(all_windows) > max_windows:
+            idx = rng.choice(len(all_windows), size=max_windows, replace=False)
+            all_windows = [all_windows[i] for i in idx]
+
+        normalized = []
+        for w in all_windows:
+            means = np.mean(w, axis=0)
+            stds = np.std(w, axis=0)
+            stds = np.where(stds < 0.5, 1.0, stds)
+            normalized.append(((w - means) / stds).flatten())
+
+        return np.array(normalized, dtype=np.float32)
+
     def _quick_train_baseline(self):
         """
-        Trains the autoencoder on smooth, standardized sinusoidal trajectories
-        so it masters typical continuous meteorological trends.
+        Trains the autoencoder on smooth synthetic sinusoidal trajectories blended
+        with locally-normalized windows drawn from real NOAA ISD-Lite station data
+        (when available -- see data/real_stations/), so it masters both idealized
+        diurnal cycles and genuine real-world meteorological trajectories.
         """
         torch.manual_seed(42)
         np.random.seed(42)
-        
+
         optimizer = torch.optim.Adam(self.model.parameters(), lr=0.01)
-        
+
         batch_seqs = []
         for _ in range(500):
             t0 = np.random.uniform(0, 24)
             time_steps = np.linspace(t0, t0 + 1.5, self.seq_len)
-            
+
             # Synthetic normalized smooth curves
             temp_seq = np.sin(2 * np.pi * time_steps / 24.0) + np.random.normal(0, 0.05, self.seq_len)
             hum_seq = -np.sin(2 * np.pi * time_steps / 24.0) + np.random.normal(0, 0.05, self.seq_len)
             pres_seq = np.sin(4 * np.pi * time_steps / 24.0) * 0.3 + np.random.normal(0, 0.05, self.seq_len)
-            
+
             seq_matrix = np.column_stack([temp_seq, pres_seq, hum_seq]).flatten()
             batch_seqs.append(seq_matrix)
-            
+
+        real_windows = self._load_real_windows()
+        if real_windows is not None:
+            batch_seqs.extend(real_windows)
+            self.real_data_windows = len(real_windows)
+        else:
+            self.real_data_windows = 0
+
         tensor_data = torch.tensor(np.array(batch_seqs), dtype=torch.float32)
-        
+
         self.model.train()
         for epoch in range(60):
             optimizer.zero_grad()
@@ -82,7 +156,7 @@ class TemporalAutoencoder:
             loss = nn.MSELoss()(recon, tensor_data)
             loss.backward()
             optimizer.step()
-            
+
         self.model.eval()
         self.is_trained = True
 

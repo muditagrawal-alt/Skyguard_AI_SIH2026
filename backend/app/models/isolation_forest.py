@@ -4,10 +4,17 @@ Evaluates multi-dimensional feature space (T, P, RH, rate-of-change, VPD, dew po
 using unsupervised Isolation Forest density scoring.
 """
 
+import csv
+from pathlib import Path
+
 import numpy as np
 from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler
 from typing import Dict, Any, List, Optional
+
+from backend.app.core.physics import physics_engine
+
+REAL_DATA_DIR = Path(__file__).resolve().parents[3] / "data" / "real_stations" / "processed"
 
 
 class MultivariateOutlierDetector:
@@ -22,10 +29,45 @@ class MultivariateOutlierDetector:
         self.is_fitted = False
         self._pretrain_baseline()
 
+    def _load_real_features(self) -> Optional[np.ndarray]:
+        """
+        Builds the same 8-column feature space from real NOAA ISD-Lite observations
+        (see data/real_stations/), if the processed CSVs are present. Per-station
+        chronological consecutive-row diffs approximate d_temp/d_pres/d_hum; VPD and
+        dew-point-depression are computed with the project's own physics engine so
+        real rows are scored on identical features to synthetic ones. Returns None
+        if no processed real data is available (fresh clone, fetch script not run).
+        """
+        if not REAL_DATA_DIR.is_dir():
+            return None
+
+        rows = []
+        for csv_path in sorted(REAL_DATA_DIR.glob("*.csv")):
+            with open(csv_path, newline="") as f:
+                reader = csv.DictReader(f)
+                station_rows = list(reader)
+
+            prev_t, prev_p, prev_h = None, None, None
+            for r in station_rows:
+                t, pres, h = float(r["temperature_c"]), float(r["pressure_hpa"]), float(r["humidity_pct"])
+                d_t = abs(t - prev_t) if prev_t is not None else 0.0
+                d_p = abs(pres - prev_p) if prev_p is not None else 0.0
+                d_h = abs(h - prev_h) if prev_h is not None else 0.0
+                vpd = physics_engine.vapor_pressure_deficit(t, h)
+                td = physics_engine.dew_point(t, h)
+                dp_dep = max(0.0, t - td)
+                rows.append([t, pres, h, d_t, d_p, d_h, vpd, dp_dep])
+                prev_t, prev_p, prev_h = t, pres, h
+
+        return np.array(rows, dtype=np.float64) if rows else None
+
     def _pretrain_baseline(self):
         """
-        Generates synthetic clean baseline meteorological data covering standard diurnal variations
-        to initialize the isolation tree estimators.
+        Fits the isolation tree estimators on synthetic diurnal baseline data blended
+        with real NOAA ISD-Lite observations (when available) so the model recognizes
+        both the synthetic generator's station-level pressure convention and real
+        stations' sea-level-pressure convention as normal background variation --
+        see data/real_stations/STATION_SOURCES.md for why these two ranges differ.
         """
         np.random.seed(42)
         n_samples = 3000
@@ -44,11 +86,19 @@ class MultivariateOutlierDetector:
         vpd = np.clip((40.0 - temps) * (1.0 - (humidities / 100.0)), 0.0, 50.0)
         dp_depression = np.clip((100.0 - humidities) / 5.0, 0.0, 30.0)
 
-        X_baseline = np.column_stack([
+        X_synthetic = np.column_stack([
             temps, pressures, humidities,
             d_temp, d_pres, d_hum,
             vpd, dp_depression
         ])
+
+        X_real = self._load_real_features()
+        if X_real is not None:
+            X_baseline = np.vstack([X_synthetic, X_real])
+            self.real_data_samples = len(X_real)
+        else:
+            X_baseline = X_synthetic
+            self.real_data_samples = 0
 
         X_scaled = self.scaler.fit_transform(X_baseline)
         self.model.fit(X_scaled)
