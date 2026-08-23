@@ -215,7 +215,11 @@ class VirtualAWSNetworkSimulator:
             "is_packet_loss": is_packet_loss,
             "injected_anomalies": list(set(injected_types)),
             "injected_anomalies_effective": list(set(effective_types)),
-            "data_source": "NOAA_ISD_REAL"
+            "data_source": "NOAA_ISD_REAL",
+            # Opt in to climatological deseasonalization (see pipeline.py). The
+            # climatology is keyed by station because it was built from THIS
+            # station's own real history.
+            "climatology_key": station_id
         }
 
     def _apply_injections(self, station: "StationState", raw_temp: float, raw_pres: float, raw_hum: float):

@@ -52,7 +52,15 @@ class SelfHealingImputer:
             if h.get("imputed", {}).get("humidity") is not None
         ]
 
-        st_prof = config.stations.get(station_id, list(config.stations.values())[0])
+        # Cold-start fallback profile for a station with NO history yet. Only a
+        # profile genuinely belonging to THIS station is acceptable: the previous
+        # `list(config.stations.values())[0]` fallback silently handed an unknown
+        # station the first configured station's baseline, so an unrecognised
+        # sea-level station would have been imputed at a 785 hPa mountain
+        # baseline -- a ~230 hPa fabricated error presented to downstream
+        # forecasting as a healed value. An unknown station now gets None and the
+        # imputer declines to invent a level for it (see below).
+        st_prof = config.stations.get(station_id)
 
         # Temperature Imputation
         if temp is None or is_anomaly:
@@ -62,7 +70,7 @@ class SelfHealingImputer:
             elif len(valid_imputed_temps) >= 1:
                 imputed_temp = valid_imputed_temps[-1]
             else:
-                imputed_temp = st_prof.base_temp_c
+                imputed_temp = st_prof.base_temp_c if st_prof else temp
             reasons.append("Reconstructed temperature trajectory")
         else:
             imputed_temp = temp
@@ -74,7 +82,7 @@ class SelfHealingImputer:
             elif len(valid_imputed_pres) >= 1:
                 imputed_pres = valid_imputed_pres[-1]
             else:
-                imputed_pres = st_prof.base_pressure_hpa
+                imputed_pres = st_prof.base_pressure_hpa if st_prof else pres
             reasons.append("Reconstructed barometric pressure trajectory")
         else:
             imputed_pres = pres
@@ -86,10 +94,25 @@ class SelfHealingImputer:
             elif len(valid_imputed_hums) >= 1:
                 imputed_hum = valid_imputed_hums[-1]
             else:
-                imputed_hum = st_prof.base_humidity_pct
+                imputed_hum = st_prof.base_humidity_pct if st_prof else hum
             reasons.append("Reconstructed relative humidity trajectory")
         else:
             imputed_hum = hum
+
+        # No history, no station profile, and no current reading -> nothing
+        # defensible to impute. Report the gap honestly instead of fabricating a
+        # value that downstream forecasting would treat as observed data.
+        if imputed_temp is None or imputed_pres is None or imputed_hum is None:
+            return {
+                "temperature": imputed_temp,
+                "pressure": imputed_pres,
+                "humidity": imputed_hum,
+                "is_imputed": False,
+                "imputation_reason": (
+                    "Insufficient history for this station to reconstruct a value; "
+                    "gap reported rather than fabricated"
+                ),
+            }
 
         # Physical boundary clamping
         t_limits = config.limits["temperature"]

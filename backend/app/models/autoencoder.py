@@ -24,6 +24,8 @@ from typing import Dict, Any, List, Optional
 # cost here and makes inference exactly reproducible.
 torch.set_num_threads(1)
 
+from backend.app.core.data_split import training_rows
+
 REAL_DATA_DIR = Path(__file__).resolve().parents[3] / "data" / "real_stations" / "processed"
 
 
@@ -121,7 +123,9 @@ class TemporalAutoencoder:
         all_windows = []
         for csv_path in sorted(REAL_DATA_DIR.glob("*.csv")):
             with open(csv_path, newline="") as f:
-                station_rows = list(csv.DictReader(f))
+                # Train only on rows outside the benchmark's evaluation window --
+                # see backend/app/core/data_split.py for why.
+                station_rows = training_rows(list(csv.DictReader(f)))
             if len(station_rows) < self.seq_len:
                 continue
 
@@ -214,24 +218,47 @@ class TemporalAutoencoder:
         self.model.eval()
         self.is_trained = True
 
+    NEUTRAL_RESULT = {
+        "reconstruction_mse": 0.0,
+        "ae_anomaly_prob": 0.0,
+        "recent_temp_err": 0.0,
+        "recent_pres_err": 0.0,
+        "recent_hum_err": 0.0,
+    }
+
     def score_sequence(self, sequence_window: List[Dict[str, float]]) -> Dict[str, Any]:
         """
         Receives the last `seq_len` readings: [{temp, pres, hum}, ...]
         Performs local relative normalization to evaluate trajectory smoothness.
-        """
-        if len(sequence_window) < self.seq_len:
-            pad_needed = self.seq_len - len(sequence_window)
-            first_item = sequence_window[0] if sequence_window else {"temperature": 25.0, "pressure": 1000.0, "humidity": 60.0}
-            padded_window = [first_item] * pad_needed + list(sequence_window)
-        else:
-            padded_window = list(sequence_window[-self.seq_len:])
 
-        raw_array = np.array([
-            [r.get("temperature", 25.0) or 25.0, 
-             r.get("pressure", 1000.0) or 1000.0, 
-             r.get("humidity", 60.0) or 60.0]
-            for r in padded_window
-        ], dtype=np.float32)
+        Contains NO assumed "typical" station values. This detector judges the
+        SHAPE of a trajectory after local normalization, so any invented absolute
+        level (the previous 25C / 1000 hPa / 60% defaults) becomes a fabricated
+        step in that shape -- and a wrong one by hundreds of hPa at a high-altitude
+        station. Short windows are padded by repeating the earliest REAL reading
+        (a flat lead-in, which normalizes to no shape change), and a window with
+        no usable readings at all returns a neutral zero score: this component
+        abstains rather than guessing, and the other three ensemble members carry
+        the decision.
+        """
+        usable = [
+            r for r in sequence_window
+            if r.get("temperature") is not None
+            and r.get("pressure") is not None
+            and r.get("humidity") is not None
+        ]
+        if not usable:
+            return dict(self.NEUTRAL_RESULT)
+
+        if len(usable) < self.seq_len:
+            padded_window = [usable[0]] * (self.seq_len - len(usable)) + usable
+        else:
+            padded_window = usable[-self.seq_len:]
+
+        raw_array = np.array(
+            [[r["temperature"], r["pressure"], r["humidity"]] for r in padded_window],
+            dtype=np.float32,
+        )
 
         # Robust local standardization per sequence -- identical to what training used
         norm_array = self._normalize_window(raw_array)

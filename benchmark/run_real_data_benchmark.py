@@ -30,11 +30,22 @@ from sklearn.metrics import precision_score, recall_score, f1_score
 
 from backend.app.core.data_generator import VirtualAWSNetworkSimulator, AnomalyInjectionRequest
 from backend.app.core.pipeline import SkyGuardPipeline
+from backend.app.core.data_split import EVAL_HOLDOUT_ROWS
 
 REAL_DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "real_stations" / "processed"
 DEFAULT_SEED = 42
 WARMUP_STEPS = 30
 MAX_STEPS_PER_STATION = 1500
+
+# The rows this benchmark evaluates on must be exactly the rows every learned
+# component is forbidden to train on. Asserted rather than assumed: if someone
+# widens the evaluation window without widening the holdout, the models would
+# silently start training on evaluation data again and every number this script
+# reports would become optimistically biased with no visible symptom.
+assert WARMUP_STEPS + MAX_STEPS_PER_STATION == EVAL_HOLDOUT_ROWS, (
+    f"Evaluation window ({WARMUP_STEPS + MAX_STEPS_PER_STATION}) must equal the "
+    f"training holdout ({EVAL_HOLDOUT_ROWS}) in backend/app/core/data_split.py"
+)
 
 # Cycle through: a clean real-weather block (pure false-positive test against genuine
 # historical variability), then a block of each injected fault type, repeating.

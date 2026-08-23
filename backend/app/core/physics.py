@@ -102,11 +102,11 @@ class PhysicsEngine:
         rh_limits = config.limits["humidity"]
 
         if temp_c < t_limits.min_val or temp_c > t_limits.max_val:
-            violations.append(f"Temperature {temp_c:.1f}°C out of WMO bounds [{t_limits.min_val}, {t_limits.max_val}]")
+            violations.append(f"Temperature {temp_c:.1f}°C out of physical bounds [{t_limits.min_val}, {t_limits.max_val}]")
             scores.append(1.0)
         
         if pressure_hpa < p_limits.min_val or pressure_hpa > p_limits.max_val:
-            violations.append(f"Pressure {pressure_hpa:.1f} hPa out of WMO bounds [{p_limits.min_val}, {p_limits.max_val}]")
+            violations.append(f"Pressure {pressure_hpa:.1f} hPa out of physical bounds [{p_limits.min_val}, {p_limits.max_val}]")
             scores.append(1.0)
 
         if humidity_pct < rh_limits.min_val or humidity_pct > 102.0:

@@ -26,6 +26,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional
 
+from backend.app.core.data_split import training_rows
+
 REAL_DATA_DIR = Path(__file__).resolve().parents[3] / "data" / "real_stations" / "processed"
 SENSORS = ("temperature_c", "pressure_hpa", "humidity_pct")
 
@@ -45,17 +47,21 @@ class StationClimatology:
             counts = {s: defaultdict(int) for s in SENSORS}
 
             with open(csv_path, newline="") as f:
-                for row in csv.DictReader(f):
-                    try:
-                        hour = datetime.fromisoformat(row["timestamp"]).hour
-                    except (ValueError, KeyError):
+                # Build the climatological baseline only from rows outside the
+                # benchmark's evaluation window -- see core/data_split.py.
+                station_rows = training_rows(list(csv.DictReader(f)))
+
+            for row in station_rows:
+                try:
+                    hour = datetime.fromisoformat(row["timestamp"]).hour
+                except (ValueError, KeyError):
+                    continue
+                for sensor in SENSORS:
+                    val = row.get(sensor)
+                    if val is None or val == "":
                         continue
-                    for sensor in SENSORS:
-                        val = row.get(sensor)
-                        if val is None or val == "":
-                            continue
-                        sums[sensor][hour] += float(val)
-                        counts[sensor][hour] += 1
+                    sums[sensor][hour] += float(val)
+                    counts[sensor][hour] += 1
 
             self._hourly_mean[station_id] = {
                 sensor: {

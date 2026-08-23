@@ -43,17 +43,38 @@ class SystemConfig(BaseModel):
     magnus_ice_b: float = 22.5
     magnus_ice_c: float = 273.0
 
-    # WMO Physical Limit Quality Control Boundaries
+    # Physical plausibility bounds -- the OUTER envelope of what any Earth surface
+    # station can legitimately report, not a typical operating range.
+    #
+    # These were previously -40..60 C and 750..1080 hPa, which are mid-latitude
+    # LOWLAND ranges, not physical limits. That silently made the system wrong for
+    # exactly the stations that need it most: a legitimate Antarctic reading
+    # (-55 C) or a high-altitude Andean/Himalayan station (~600 hPa station-level
+    # pressure) was flagged as a physics violation, and worse, the self-healing
+    # imputer CLAMPED those real values into the assumed range -- handing
+    # downstream forecasting a fabricated -40 C in place of a true -55 C.
+    #
+    # Bounds are now set beyond every recorded Earth surface extreme, with margin:
+    #   temperature  -95 C  (record: -89.2 C, Vostok 1983) .. +65 C (record: 56.7 C)
+    #   pressure     300 hPa (station-level pressure near 9 km altitude)
+    #                        .. 1085 hPa (record: 1083.8 hPa, Agata 1968)
+    # A genuinely broken sensor (300 C, negative pressure, RH of 5000%) is still
+    # caught; a real extreme-environment station is no longer corrupted. Fine-
+    # grained detection is the job of the psychrometric, gradient, and statistical
+    # checks -- not of a coarse range gate pretending to be a physical law.
+    #
+    # Per-station overrides: set `limits_override` on a StationProfile to tighten
+    # these for a site whose real operating envelope is known and narrower.
     limits: Dict[str, SensorLimits] = {
         "temperature": SensorLimits(
-            min_val=-40.0,
-            max_val=60.0,
+            min_val=-95.0,
+            max_val=65.0,
             max_step_1min=3.0,   # WMO: >3°C/min is extreme/unphysical in standard conditions
             max_step_5min=6.0
         ),
         "pressure": SensorLimits(
-            min_val=750.0,       # Mountainous/High-altitude baseline to deep low
-            max_val=1080.0,      # Extreme Siberian high
+            min_val=300.0,
+            max_val=1085.0,
             max_step_1min=2.0,   # Rapid barometric pressure jump (hPa/min)
             max_step_5min=4.0
         ),

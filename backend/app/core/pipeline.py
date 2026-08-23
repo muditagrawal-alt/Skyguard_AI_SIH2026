@@ -75,7 +75,12 @@ class SkyGuardPipeline:
         """
         Executes end-to-end processing of a single streaming observation.
         """
-        station_id = raw_packet.get("station_id", "AWS_ALPHA_MOUNTAIN")
+        # A packet with no station_id gets its own isolated state under a neutral
+        # sentinel -- never a real station's. Defaulting to a named demo station
+        # (previously "AWS_ALPHA_MOUNTAIN") silently merged unattributed readings
+        # into that station's sliding buffer and EWMA/CUSUM baselines, corrupting
+        # the detection state of a real station with foreign data.
+        station_id = raw_packet.get("station_id") or "UNSPECIFIED_STATION"
         buffer = self._get_buffer(station_id)
 
         temp = raw_packet.get("temperature")
@@ -132,25 +137,34 @@ class SkyGuardPipeline:
         # several consecutive hours every single day. Subtracting "what's normal for
         # this hour" removes that confound; real calibration drift, unlike ordinary
         # diurnal warming, does not follow the diurnal shape, so it stands out in the
-        # residual instead of being swamped by it. Gated explicitly on data_source
-        # (set only by generate_next_reading_from_real) rather than auto-detected, so
-        # the synthetic path -- already tuned to 95% F1 -- is untouched.
+        # residual instead of being swamped by it.
         stat_temp, stat_pres, stat_hum = temp, pres, hum
         is_deseasonalized = False
-        if raw_packet.get("data_source") == "NOAA_ISD_REAL" and station_climatology.has_climatology(station_id):
+        # Deseasonalization is opt-in per packet via `climatology_key`, NOT gated on
+        # a hardcoded data-source name. Any producer -- a real archive replay, a live
+        # station feed, a future third-party source -- enables it by naming the
+        # climatology its readings should be compared against; producers that set
+        # nothing are simply never deseasonalized. This matters because a
+        # climatology is only valid for the measurement convention it was built
+        # from: the real archives report sea-level pressure (~1013 hPa) while the
+        # synthetic generator reports station-level pressure (~785 hPa at altitude)
+        # under the SAME station ids, so keying on station id alone would apply one
+        # convention's baseline to the other's readings.
+        climatology_key = raw_packet.get("climatology_key")
+        if climatology_key and station_climatology.has_climatology(climatology_key):
             hour = raw_packet.get("simulated_hour", 12.0)
             if temp is not None:
-                exp = station_climatology.expected(station_id, hour, "temperature")
+                exp = station_climatology.expected(climatology_key, hour, "temperature")
                 if exp is not None:
                     stat_temp = temp - exp
                     is_deseasonalized = True
             if pres is not None:
-                exp = station_climatology.expected(station_id, hour, "pressure")
+                exp = station_climatology.expected(climatology_key, hour, "pressure")
                 if exp is not None:
                     stat_pres = pres - exp
                     is_deseasonalized = True
             if hum is not None:
-                exp = station_climatology.expected(station_id, hour, "humidity")
+                exp = station_climatology.expected(climatology_key, hour, "humidity")
                 if exp is not None:
                     stat_hum = hum - exp
                     is_deseasonalized = True
@@ -193,17 +207,35 @@ class SkyGuardPipeline:
             }
 
         # 4. Temporal Sequence Autoencoder Scoring
-        sequence_window = [
-            {"temperature": r.get("raw", {}).get("temperature", 25.0),
-             "pressure": r.get("raw", {}).get("pressure", 1000.0),
-             "humidity": r.get("raw", {}).get("humidity", 60.0)}
-            for r in buffer[-15:]
-        ]
-        sequence_window.append({
-            "temperature": temp if temp is not None else 25.0,
-            "pressure": pres if pres is not None else 1000.0,
-            "humidity": hum if hum is not None else 60.0
-        })
+        #
+        # Missing values are filled by last-observation-carried-forward from this
+        # station's OWN recent history, never by a fixed "typical" constant. The
+        # previous 25.0C / 1000.0 hPa / 60.0% fallbacks silently encoded a
+        # temperate-lowland station as the assumed norm: substituting 1000 hPa at
+        # a 785 hPa mountain station, or 25C at a station whose real baseline is
+        # 34C, injects a fabricated ~200 hPa / ~9C step into the very trajectory
+        # the autoencoder is judging for smoothness -- manufacturing an anomaly
+        # out of a dropped packet, and doing so worst at exactly the stations
+        # least like the hardcoded assumption. LOCF is station-agnostic: it
+        # asserts only "we have no new information", which is what a dropped
+        # packet actually means.
+        sequence_window = []
+        last_seen = {"temperature": None, "pressure": None, "humidity": None}
+        for r in buffer[-15:]:
+            r_raw = r.get("raw", {})
+            entry = {}
+            for key in ("temperature", "pressure", "humidity"):
+                val = r_raw.get(key)
+                if val is not None:
+                    last_seen[key] = val
+                entry[key] = val if val is not None else last_seen[key]
+            sequence_window.append(entry)
+
+        current = {"temperature": temp, "pressure": pres, "humidity": hum}
+        for key, val in current.items():
+            if val is not None:
+                last_seen[key] = val
+        sequence_window.append({k: (v if v is not None else last_seen[k]) for k, v in current.items()})
 
         ae_res = temporal_autoencoder.score_sequence(sequence_window)
 

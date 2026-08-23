@@ -13,6 +13,7 @@ from sklearn.preprocessing import StandardScaler
 from typing import Dict, Any, List, Optional
 
 from backend.app.core.physics import physics_engine
+from backend.app.core.data_split import training_rows
 
 REAL_DATA_DIR = Path(__file__).resolve().parents[3] / "data" / "real_stations" / "processed"
 
@@ -50,7 +51,9 @@ class MultivariateOutlierDetector:
         for csv_path in sorted(REAL_DATA_DIR.glob("*.csv")):
             with open(csv_path, newline="") as f:
                 reader = csv.DictReader(f)
-                station_rows = list(reader)
+                # Train only on rows outside the benchmark's evaluation window --
+                # see backend/app/core/data_split.py for why.
+                station_rows = training_rows(list(reader))
 
             prev_t, prev_p, prev_h = None, None, None
             for r in station_rows:
