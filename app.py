@@ -17,6 +17,7 @@ import streamlit as st
 from backend.app.core.config import config
 from backend.app.core.data_generator import simulator, AnomalyInjectionRequest
 from backend.app.core.pipeline import pipeline
+from backend.app.models.isolation_forest import multivariate_detector
 
 # Page configuration
 st.set_page_config(
@@ -112,6 +113,17 @@ with st.sidebar:
     st.markdown("### 📋 WMO QC Standard")
     st.caption("• Max ΔT: 3.0°C / min\n• Max ΔP: 2.0 hPa / min\n• Max ΔRH: 15.0% / min\n• Clausius-Clapeyron: T ≥ Td")
 
+    st.markdown("---")
+    real_data_n = getattr(multivariate_detector, "real_data_samples", 0)
+    if real_data_n > 0:
+        st.caption(f"🌍 Isolation Forest & Autoencoder trained on synthetic data "
+                   f"blended with **{real_data_n:,} real NOAA ISD-Lite observations** "
+                   f"(see `data/real_stations/`).")
+    else:
+        st.caption("🌍 Models trained on synthetic data only — run "
+                   "`data/real_stations/fetch_and_process.py` to blend in real "
+                   "NOAA historical observations.")
+
 
 # Main Dashboard Header
 st.title("🌦️ SkyGuard AI — Real-Time Control Center")
@@ -183,8 +195,10 @@ if st.session_state.is_running or len(st.session_state.history) == 0:
     if len(st.session_state.history) > 60:
         st.session_state.history.pop(0)
 
-    # Log to audit log if anomalous or extreme weather
-    if processed["ensemble"]["is_anomaly"] or processed["root_cause"]["is_genuine_weather"] and processed["root_cause"]["fault_type"] != "NORMAL":
+    # Log to audit log if anomalous or extreme weather. root_cause_classifier
+    # guarantees fault_type == "NORMAL" whenever is_anomaly is False, so this is
+    # equivalent to just `is_anomaly` -- kept explicit for readability.
+    if processed["ensemble"]["is_anomaly"]:
         st.session_state.audit_log.append({
             "timestamp": processed["timestamp"],
             "station": processed["station_id"],
@@ -373,6 +387,27 @@ with col_xai:
             <b>Diagnostic Report:</b><br>{xai_info['explanation']}
         </div>
         """, unsafe_allow_html=True)
+
+        # Cross-Station Spatial Consistency: only has data once this session has
+        # stepped more than one station (the pipeline instance is shared across
+        # the whole app process, so switching stations and stepping each one
+        # populates this). Surfaces backend/app/core/pipeline.py's spatial_res.
+        spatial = latest.get("spatial", {})
+        other_n = spatial.get("other_stations_reporting", 0)
+        if other_n > 0:
+            other_anom = spatial.get("other_stations_anomalous", 0)
+            if spatial.get("is_corroborated_event"):
+                st.caption(f"🛰️ Spatial context: {other_anom}/{other_n} other tracked station(s) "
+                           f"concurrently anomalous — corroborates a genuine regional event.")
+            elif spatial.get("is_isolated_event"):
+                st.caption(f"🛰️ Spatial context: isolated to this station — {other_n} other tracked "
+                           f"station(s) all report normal conditions.")
+            else:
+                st.caption(f"🛰️ Spatial context: {other_n} other station(s) tracked this session, "
+                           f"{other_anom} currently anomalous.")
+        else:
+            st.caption("🛰️ Spatial context: no other station has been viewed yet this session — "
+                       "switch stations and let each run to enable cross-station corroboration.")
 
         # Feature Attribution Bar Chart
         attributions = xai_info["attributions"]
