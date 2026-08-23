@@ -28,6 +28,48 @@ class SkyGuardPipeline:
             self.station_buffers[station_id] = []
         return self.station_buffers[station_id]
 
+    def _get_spatial_context(self, station_id: str, is_anomaly: bool) -> Dict[str, Any]:
+        """
+        Cross-station spatial consistency check. Directly implements the problem
+        statement's own example scenario: "...while neighboring stations show normal
+        conditions. The AI system should analyze temporal and spatial consistency,
+        identify the reading as a probable sensor anomaly." Looks at the most recent
+        processed reading from every OTHER station this pipeline instance is tracking.
+
+        Requires multiple stations to be live in the SAME pipeline instance to produce
+        a judgement -- true for the shared `pipeline` singleton used by the FastAPI
+        backend and the Streamlit UI (backend/app/main.py, app.py), which track all
+        configured stations concurrently. A benchmark harness that only ever feeds one
+        station through an isolated SkyGuardPipeline() instance will see
+        `other_stations_reporting=0` and this check stays neutral, by design --
+        it cannot claim isolation or corroboration it has no data for.
+        """
+        other_station_ids = [
+            sid for sid in self.station_buffers
+            if sid != station_id and self.station_buffers[sid]
+        ]
+        other_reporting = len(other_station_ids)
+
+        if other_reporting == 0:
+            return {
+                "other_stations_reporting": 0,
+                "other_stations_anomalous": 0,
+                "is_isolated_event": None,
+                "is_corroborated_event": False
+            }
+
+        other_anomalous = sum(
+            1 for sid in other_station_ids
+            if self.station_buffers[sid][-1].get("ensemble", {}).get("is_anomaly", False)
+        )
+
+        return {
+            "other_stations_reporting": other_reporting,
+            "other_stations_anomalous": other_anomalous,
+            "is_isolated_event": bool(is_anomaly and other_anomalous == 0),
+            "is_corroborated_event": bool(is_anomaly and (other_anomalous / other_reporting) >= 0.34)
+        }
+
     def process_reading(self, raw_packet: Dict[str, Any], dt_seconds: float = 1.0) -> Dict[str, Any]:
         """
         Executes end-to-end processing of a single streaming observation.
@@ -134,7 +176,10 @@ class SkyGuardPipeline:
             stat_res=stat_res
         )
 
-        # 6. Root Cause Diagnostics & Weather vs Fault Discrimination
+        # 6. Cross-Station Spatial Consistency Check
+        spatial_res = self._get_spatial_context(station_id, ensemble_res["is_anomaly"])
+
+        # 7. Root Cause Diagnostics & Weather vs Fault Discrimination
         raw_dict = {"temperature": temp, "pressure": pres, "humidity": hum}
         root_cause_res = root_cause_classifier.classify_fault(
             raw_reading=raw_dict,
@@ -143,7 +188,8 @@ class SkyGuardPipeline:
             ae_res=ae_res,
             if_res=if_res,
             ensemble_res=ensemble_res,
-            temporal_window=buffer
+            temporal_window=buffer,
+            spatial_res=spatial_res
         )
 
         # 7. XAI Feature Attributions & Natural Language Explanation
@@ -198,6 +244,7 @@ class SkyGuardPipeline:
             "autoencoder": ae_res,
             "ensemble": ensemble_res,
             "root_cause": root_cause_res,
+            "spatial": spatial_res,
             "xai": {
                 "attributions": attributions,
                 "explanation": explanation

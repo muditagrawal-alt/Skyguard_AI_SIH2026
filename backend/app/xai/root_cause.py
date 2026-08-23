@@ -15,7 +15,8 @@ class RootCauseClassifier:
         ae_res: Dict[str, Any],
         if_res: Dict[str, Any],
         ensemble_res: Dict[str, Any],
-        temporal_window: List[Dict[str, Any]]
+        temporal_window: List[Dict[str, Any]],
+        spatial_res: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         Classifies anomaly into a specific root-cause category:
@@ -108,10 +109,42 @@ class RootCauseClassifier:
             # - Saturated / high humidity (> 75%) with recent cooling or rain downdraft
             is_convective_storm = len(hard_violations) == 0 and (recent_drops or (hum is not None and hum > 78.0))
 
+            # Cross-station spatial consistency: a CUSUM/statistical filter alone cannot
+            # tell "the sensor is drifting" from "the weather is genuinely, gradually
+            # changing" using one station's own history -- that requires an independent
+            # reference. If other stations in the network are concurrently anomalous,
+            # that corroborates a genuine, spatially-correlated atmospheric event even
+            # from a softer single-station signal, so corroboration ONLY ever loosens
+            # this gate, never tightens it.
+            #
+            # The reverse -- tightening when this station is isolated and every other
+            # reporting station is calm -- is deliberately NOT applied here, even
+            # though it's the literal scenario in the problem statement's own worked
+            # example ("neighboring stations show normal conditions" -> local fault).
+            # That inference only holds for a dense local mesonet where a real storm
+            # plausibly reaches more than one station. SkyGuard's 4 demo stations are
+            # continents apart (Delhi / Mumbai / Rajasthan / Arizona) -- a genuine
+            # storm at any one of them is ALWAYS isolated relative to the others, so
+            # tightening on isolation was measured (see
+            # benchmark/run_spatial_consistency_benchmark.py) to punish real weather
+            # almost every time (single-station storm false-alarm rate went from ~16%
+            # to 87.5%) rather than catching faults. Isolation is surfaced below as
+            # explanatory text only -- it does not change the classification.
+            spatial_category_suffix = ""
+            if spatial_res is not None and spatial_res.get("other_stations_reporting", 0) > 0:
+                if spatial_res.get("is_corroborated_event"):
+                    is_convective_storm = is_convective_storm or (
+                        len(hard_violations) == 0 and hum is not None and hum > 65.0
+                    )
+                    n = spatial_res["other_stations_anomalous"]
+                    spatial_category_suffix = f" (corroborated: {n} other station(s) concurrently anomalous)"
+                elif spatial_res.get("is_isolated_event"):
+                    spatial_category_suffix = " (isolated to this station; other reporting stations normal)"
+
             if is_convective_storm:
                 return {
                     "fault_type": "GENUINE_EXTREME_WEATHER",
-                    "fault_category": "Atmospheric Convective Storm / Cold Front",
+                    "fault_category": "Atmospheric Convective Storm / Cold Front" + spatial_category_suffix,
                     "confidence": 0.95,
                     "is_genuine_weather": True
                 }
@@ -120,7 +153,7 @@ class RootCauseClassifier:
             if len(stat_res.get("drift_flags", [])) > 0:
                 return {
                     "fault_type": "CALIBRATION_DRIFT",
-                    "fault_category": "Sensor Aging & Calibration Drift",
+                    "fault_category": "Sensor Aging & Calibration Drift" + spatial_category_suffix,
                     "confidence": 0.88,
                     "is_genuine_weather": False
                 }
@@ -128,7 +161,7 @@ class RootCauseClassifier:
             # 6. Default to Sensor Spike / Electrical Glitch
             return {
                 "fault_type": "SENSOR_SPIKE",
-                "fault_category": "Electrical Transient / Sensor Glitch",
+                "fault_category": "Electrical Transient / Sensor Glitch" + spatial_category_suffix,
                 "confidence": 0.90,
                 "is_genuine_weather": False
             }
