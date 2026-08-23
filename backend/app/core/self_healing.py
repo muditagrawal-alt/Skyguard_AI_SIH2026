@@ -11,9 +11,6 @@ from backend.app.core.config import config
 
 
 class SelfHealingImputer:
-    def __init__(self, history_len: int = 30):
-        self.history_len = history_len
-
     def impute_reading(
         self,
         station_id: str,

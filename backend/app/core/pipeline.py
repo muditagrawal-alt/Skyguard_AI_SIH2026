@@ -19,8 +19,8 @@ from backend.app.core.config import config
 
 
 class SkyGuardPipeline:
-    def __init__(self, buffer_size: int = 60):
-        self.buffer_size = buffer_size
+    def __init__(self, buffer_size: int = None):
+        self.buffer_size = buffer_size if buffer_size is not None else config.sliding_window_size
         self.station_buffers: Dict[str, List[Dict[str, Any]]] = {}
 
     def _get_buffer(self, station_id: str) -> List[Dict[str, Any]]:

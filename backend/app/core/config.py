@@ -31,8 +31,7 @@ class StationProfile(BaseModel):
 
 class SystemConfig(BaseModel):
     # Streaming parameters
-    sampling_interval_sec: float = 1.0
-    sliding_window_size: int = 60  # 60 timesteps in temporal memory
+    sliding_window_size: int = 60  # 60 timesteps in temporal memory (SkyGuardPipeline's buffer_size)
     
     # Thermodynamic Magnus-Tetens coefficients for water vapor (above 0°C)
     # e_s(T) = a * exp((b * T) / (c + T))

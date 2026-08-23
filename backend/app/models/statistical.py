@@ -144,7 +144,7 @@ class StatisticalEngine:
 
     def process(
         self, station_id: str, temp_c: Optional[float], pressure_hpa: Optional[float],
-        humidity_pct: Optional[float], dt_seconds: float = 60.0
+        humidity_pct: Optional[float], dt_seconds: float = 1.0
     ) -> Dict[str, Any]:
         """
         `dt_seconds`: elapsed time since the previous reading. Every synthetic-path
