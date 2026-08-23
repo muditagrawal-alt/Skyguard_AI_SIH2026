@@ -135,13 +135,25 @@ class MultivariateOutlierDetector:
         # Decision function: positive means normal, negative means abnormal
         raw_score = float(self.model.decision_function(features_scaled)[0])
         
-        if raw_score >= 0.05:
-            anomaly_prob = max(0.0, 0.15 - (raw_score * 0.5))
-        elif raw_score >= 0.0:
-            anomaly_prob = 0.20 + ((0.05 - raw_score) * 2.0)
-        else:
-            # Outlier region (raw_score < 0)
-            anomaly_prob = min(1.0, 0.50 + abs(raw_score) * 3.5)
+        # Smooth monotonic logistic mapping of the decision function to [0, 1].
+        # Replaces a 3-branch piecewise mapping that had a hard DISCONTINUITY at
+        # raw_score = 0: a reading at raw=+0.001 scored 0.30, while raw=-0.001 --
+        # a numerically indistinguishable neighbour -- jumped straight to 0.50,
+        # above the ensemble's 0.35 anomaly cutoff. Since IsolationForest's
+        # decision_function crosses zero at the `contamination` quantile (3%) of
+        # the TRAINING distribution, real readings sit near that boundary
+        # constantly, so that cliff converted ordinary boundary noise into
+        # confident anomaly calls. A logistic is continuous, monotonically
+        # decreasing in raw_score, and keeps the same "0 means maximally
+        # uncertain" centre without the cliff on either side of it.
+        # Steepness and offset are chosen so the curve passes through the ensemble's
+        # own 0.35 anomaly cutoff exactly at raw_score = 0 -- preserving this
+        # detector's established decision boundary (`is_anomaly = raw_score < 0`,
+        # the contamination quantile) rather than silently shifting it, while the
+        # steepness keeps clearly-normal readings (raw ~ +0.12 in the measured real
+        # data) down near 0.03 instead of loitering just under the cutoff.
+        # offset = ln(1/0.35 - 1) = 0.619 puts prob(raw=0) = 0.35.
+        anomaly_prob = 1.0 / (1.0 + np.exp(25.0 * raw_score + 0.619))
 
         is_anomaly = raw_score < 0.0
 
