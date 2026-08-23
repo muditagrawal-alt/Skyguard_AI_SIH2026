@@ -92,7 +92,18 @@ class RootCauseClassifier:
                     "is_genuine_weather": False
                 }
 
-            # Inspect recent trajectory for convective meteorological event
+            # Inspect recent trajectory for convective meteorological event.
+            # Both legs require a TREND (change over the lookback), not an absolute
+            # level. An earlier version flagged `hum > 75.0` alone regardless of
+            # whether humidity had actually moved -- which meant any station where
+            # ambient humidity is naturally often above that (a humid morning, a
+            # coastal profile with an ~82% baseline) would rubber-stamp genuine-
+            # weather status on ANY simultaneously-occurring unrelated fault, since
+            # the check never looked at whether the fault itself had anything to do
+            # with humidity. Caught on real NOAA data: a real humid Delhi morning
+            # coinciding with an injected temperature-only spike got misclassified
+            # as GENUINE_EXTREME_WEATHER purely because ambient humidity happened to
+            # already be elevated, unrelated to the spike.
             recent_drops = False
             if len(temporal_window) >= 1:
                 recent_temps = [r.get("raw", {}).get("temperature") for r in temporal_window[-10:] if r.get("raw", {}).get("temperature") is not None]
@@ -101,7 +112,7 @@ class RootCauseClassifier:
                     if temp is not None and recent_temps[0] is not None and (temp - recent_temps[0]) < -0.5:
                         recent_drops = True
                 if len(recent_hums) >= 1:
-                    if hum is not None and hum > 75.0:
+                    if hum is not None and recent_hums[0] is not None and (hum - recent_hums[0]) > 10.0:
                         recent_drops = True
 
             # Coordinated short-window trend: temperature falling AND humidity rising
@@ -139,11 +150,9 @@ class RootCauseClassifier:
 
             # Convective Thunderstorm / Cold Front signature:
             # - No thermodynamic bounds broken (T >= Td)
-            # - Saturated / high humidity (> 75%) with recent cooling or rain downdraft
+            # - Recent cooling and/or a real humidity RISE (trend, not absolute level)
             # - OR a coordinated short-window cooling+moistening trend already underway
-            is_convective_storm = len(hard_violations) == 0 and (
-                recent_drops or coordinated_trend or (hum is not None and hum > 78.0)
-            )
+            is_convective_storm = len(hard_violations) == 0 and (recent_drops or coordinated_trend)
 
             # Cross-station spatial consistency: a CUSUM/statistical filter alone cannot
             # tell "the sensor is drifting" from "the weather is genuinely, gradually
