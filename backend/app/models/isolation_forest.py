@@ -24,7 +24,12 @@ class MultivariateOutlierDetector:
             n_estimators=100,
             contamination=0.03,
             random_state=42,
-            n_jobs=-1
+            # n_jobs=1, not -1: every call here scores a single reading, so there's
+            # no batch to parallelize -- multi-threading only adds thread-pool
+            # overhead with no benefit, and removes any doubt about it as a source
+            # of run-to-run nondeterminism alongside the autoencoder's (see
+            # autoencoder.py's torch.set_num_threads(1) for the confirmed case).
+            n_jobs=1
         )
         self.is_fitted = False
         self._pretrain_baseline()

@@ -12,6 +12,18 @@ import torch.nn as nn
 import numpy as np
 from typing import Dict, Any, List, Optional
 
+# PyTorch's default CPU matmul is multi-threaded with a non-deterministic floating-
+# point reduction order -- meaning two runs with an IDENTICAL trained model and an
+# IDENTICAL input can produce slightly different forward-pass outputs (confirmed
+# directly: reconstruction_mse varied between repeated runs of the same fixed
+# reading). That tiny difference cascades through ae_anomaly_prob into the
+# ensemble score and root-cause classification, compounding over a long benchmark
+# run into measurably different aggregate precision/recall/F1 despite an
+# explicit, documented `--seed 42`. This model is a handful of tiny linear layers
+# (32-16-6-16-32 units) -- single-threaded execution has no meaningful latency
+# cost here and makes inference exactly reproducible.
+torch.set_num_threads(1)
+
 REAL_DATA_DIR = Path(__file__).resolve().parents[3] / "data" / "real_stations" / "processed"
 
 
@@ -48,6 +60,16 @@ class TemporalAutoencoderNN(nn.Module):
 
 class TemporalAutoencoder:
     def __init__(self, seq_len: int = 15):
+        # Must be seeded BEFORE TemporalAutoencoderNN() is constructed, not after:
+        # nn.Linear layer weights are randomly initialized inside __init__ itself,
+        # so seeding only inside _quick_train_baseline() (called after this point)
+        # left initialization drawing from torch's default, unseeded, genuinely
+        # different-per-process RNG state -- confirmed directly: repeated separate
+        # process runs produced different trained weights despite an identical
+        # torch.manual_seed(42) call inside _quick_train_baseline(), because the
+        # seed was set one step too late to control the one place that mattered
+        # most (the starting point optimization runs from).
+        torch.manual_seed(42)
         self.seq_len = seq_len
         self.device = torch.device("cpu")
         self.model = TemporalAutoencoderNN(seq_len=seq_len).to(self.device)
