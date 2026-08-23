@@ -134,7 +134,105 @@ class VirtualAWSNetworkSimulator:
         clean_hum = raw_hum
 
         # 3. Process Active Anomaly Injections
+        raw_temp, raw_pres, raw_hum, is_packet_loss, injected_types, effective_types = \
+            self._apply_injections(station, raw_temp, raw_pres, raw_hum)
+
+        # Update last known values for continuity
+        station.last_temp = raw_temp if not is_packet_loss else station.last_temp
+        station.last_pressure = raw_pres if not is_packet_loss else station.last_pressure
+        station.last_humidity = raw_hum if not is_packet_loss else station.last_humidity
+
+        timestamp_str = datetime.now(timezone.utc).isoformat()
+
+        return {
+            "station_id": station_id,
+            "station_name": p.name,
+            "station_type": p.station_type,
+            "timestamp": timestamp_str,
+            "simulated_hour": round(hour, 2),
+            "temperature": round(raw_temp, 2) if not is_packet_loss else None,
+            "pressure": round(raw_pres, 2) if not is_packet_loss else None,
+            "humidity": round(raw_hum, 2) if not is_packet_loss else None,
+            "clean_ground_truth": {
+                "temperature": round(clean_temp, 2),
+                "pressure": round(clean_pres, 2),
+                "humidity": round(clean_hum, 2)
+            },
+            "is_packet_loss": is_packet_loss,
+            "injected_anomalies": list(set(injected_types)),
+            "injected_anomalies_effective": list(set(effective_types))
+        }
+
+    def generate_next_reading_from_real(
+        self, station_id: str, real_temp_c: float, real_pressure_hpa: float,
+        real_humidity_pct: float, timestamp_iso: str, dt_seconds: float = 3600.0
+    ) -> Dict[str, Any]:
+        """
+        Replays a real historical observation (e.g. from NOAA ISD-Lite) as the "clean"
+        atmospheric background signal, then applies the same anomaly injection sandbox
+        used by the synthetic diurnal path. This lets the benchmark evaluate detection
+        against genuine historical weather trajectories instead of a self-authored
+        synthetic curve, while still using controlled/labeled injected faults (real
+        archives have no hand-labeled sensor-fault ground truth to train or score against).
+        """
+        if station_id not in self.stations:
+            station_id = list(self.stations.keys())[0]
+
+        station = self.stations[station_id]
+        p = station.profile
+        station.step_count += 1
+
+        try:
+            real_hour = datetime.fromisoformat(timestamp_iso).hour + datetime.fromisoformat(timestamp_iso).minute / 60.0
+            station.simulated_time_hour = real_hour
+        except (ValueError, TypeError):
+            pass  # keep last known simulated_time_hour if the real timestamp can't be parsed
+
+        clean_temp, clean_pres, clean_hum = real_temp_c, real_pressure_hpa, real_humidity_pct
+        raw_temp, raw_pres, raw_hum = real_temp_c, real_pressure_hpa, real_humidity_pct
+
+        raw_temp, raw_pres, raw_hum, is_packet_loss, injected_types, effective_types = \
+            self._apply_injections(station, raw_temp, raw_pres, raw_hum)
+
+        station.last_temp = raw_temp if not is_packet_loss else station.last_temp
+        station.last_pressure = raw_pres if not is_packet_loss else station.last_pressure
+        station.last_humidity = raw_hum if not is_packet_loss else station.last_humidity
+
+        return {
+            "station_id": station_id,
+            "station_name": p.name,
+            "station_type": p.station_type,
+            "timestamp": timestamp_iso,
+            "simulated_hour": round(station.simulated_time_hour, 2),
+            "temperature": round(raw_temp, 2) if not is_packet_loss else None,
+            "pressure": round(raw_pres, 2) if not is_packet_loss else None,
+            "humidity": round(raw_hum, 2) if not is_packet_loss else None,
+            "clean_ground_truth": {
+                "temperature": round(clean_temp, 2),
+                "pressure": round(clean_pres, 2),
+                "humidity": round(clean_hum, 2)
+            },
+            "is_packet_loss": is_packet_loss,
+            "injected_anomalies": list(set(injected_types)),
+            "injected_anomalies_effective": list(set(effective_types)),
+            "data_source": "NOAA_ISD_REAL"
+        }
+
+    def _apply_injections(self, station: "StationState", raw_temp: float, raw_pres: float, raw_hum: float):
+        """
+        Applies all currently active anomaly injections to a base (clean) reading triple.
+        Shared by both the synthetic diurnal generator and the real-data replay path.
+
+        Returns (raw_temp, raw_pres, raw_hum, is_packet_loss, injected_types, effective_types).
+        `injected_types` lists every injection type currently active this step regardless of
+        whether it happened to perturb the reading (e.g. a pulsed spike between pulses).
+        `effective_types` lists only the injections that actually altered the reading THIS
+        step -- benchmark ground-truth labels should be built from this, not `injected_types`,
+        otherwise a pulsed injection's "off" steps get mislabeled as missed detections.
+        """
+        p = station.profile
         injected_types = []
+        effective_types = []
         is_packet_loss = False
 
         surviving_injections = []
@@ -143,10 +241,12 @@ class VirtualAWSNetworkSimulator:
             sensor = inj["sensor"]
             intensity = inj["intensity"]
             injected_types.append(itype)
+            is_effective = True
 
             if itype == "spike":
                 # Impulsive transient spike pulse
                 pulse = 1.0 if (inj["step_progress"] % 3 == 0 or inj["step_progress"] < 3) else 0.0
+                is_effective = pulse > 0.0
                 spike_delta = (15.0 + random.uniform(1.0, 4.0)) * intensity * pulse
                 if sensor in ("temperature", "all"):
                     raw_temp += spike_delta
@@ -195,13 +295,16 @@ class VirtualAWSNetworkSimulator:
                 # Rapid T drop, RH surging to near 100%, and Pressure jump
                 station.storm_step += 1
                 progress = min(1.0, station.storm_step / max(1, inj["total_duration"]))
-                
+
                 # Temperature drops -8°C
                 raw_temp -= 8.0 * math.sin(progress * math.pi / 2.0)
                 # Humidity jumps to 96%
                 raw_hum = min(98.0, raw_hum + 35.0 * math.sin(progress * math.pi / 2.0))
                 # Pressure surges +2.8 hPa (gust front nose)
                 raw_pres += 2.8 * math.sin(progress * math.pi)
+
+            if is_effective:
+                effective_types.append(itype)
 
             inj["duration_remaining"] -= 1
             inj["step_progress"] += 1
@@ -217,30 +320,7 @@ class VirtualAWSNetworkSimulator:
         if "flatline" not in active_types:
             station.flatline_values = {"temperature": None, "pressure": None, "humidity": None}
 
-        # Update last known values for continuity
-        station.last_temp = raw_temp if not is_packet_loss else station.last_temp
-        station.last_pressure = raw_pres if not is_packet_loss else station.last_pressure
-        station.last_humidity = raw_hum if not is_packet_loss else station.last_humidity
-
-        timestamp_str = datetime.now(timezone.utc).isoformat()
-
-        return {
-            "station_id": station_id,
-            "station_name": p.name,
-            "station_type": p.station_type,
-            "timestamp": timestamp_str,
-            "simulated_hour": round(hour, 2),
-            "temperature": round(raw_temp, 2) if not is_packet_loss else None,
-            "pressure": round(raw_pres, 2) if not is_packet_loss else None,
-            "humidity": round(raw_hum, 2) if not is_packet_loss else None,
-            "clean_ground_truth": {
-                "temperature": round(clean_temp, 2),
-                "pressure": round(clean_pres, 2),
-                "humidity": round(clean_hum, 2)
-            },
-            "is_packet_loss": is_packet_loss,
-            "injected_anomalies": list(set(injected_types))
-        }
+        return raw_temp, raw_pres, raw_hum, is_packet_loss, injected_types, effective_types
 
 
 simulator = VirtualAWSNetworkSimulator()

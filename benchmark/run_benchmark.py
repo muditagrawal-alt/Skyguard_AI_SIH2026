@@ -9,6 +9,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import time
+import random
+import argparse
 import numpy as np
 import pandas as pd
 from sklearn.metrics import precision_score, recall_score, f1_score
@@ -17,10 +19,19 @@ from backend.app.core.config import config
 from backend.app.core.data_generator import VirtualAWSNetworkSimulator, AnomalyInjectionRequest
 from backend.app.core.pipeline import SkyGuardPipeline
 
+DEFAULT_SEED = 42
 
-def run_comprehensive_benchmark():
+
+def run_comprehensive_benchmark(seed: int = DEFAULT_SEED):
+    # The simulator's diurnal noise and anomaly pulses use the unseeded global `random`
+    # module, so without pinning a seed here every benchmark run produces different
+    # KPI numbers -- making the README's reported table impossible to reproduce or audit.
+    random.seed(seed)
+    np.random.seed(seed)
+
     print("=" * 70)
     print("🚀 RUNNING SKYGUARD AI COMPREHENSIVE BENCHMARK EVALUATION")
+    print(f"   (seed={seed}, deterministic and reproducible)")
     print("=" * 70)
 
     sim = VirtualAWSNetworkSimulator()
@@ -86,13 +97,24 @@ def run_comprehensive_benchmark():
             is_fault_flagged = res["ensemble"]["is_anomaly"] and not res["root_cause"]["is_genuine_weather"]
 
             pred_bin = 1 if is_fault_flagged else 0
-            y_true_cat.append(expected_label)
+
+            # "spike" is a pulsed injection (~1/3 of steps actually perturbed -- see
+            # VirtualAWSNetworkSimulator._apply_injections). Labeling every step in the
+            # window as ground-truth-anomaly regardless would score correctly-rejected
+            # clean readings as missed detections. Use the generator's own record of
+            # which steps it actually perturbed instead of a blanket window label.
+            if c_type == "spike":
+                step_label = 1 if "spike" in raw.get("injected_anomalies_effective", []) else 0
+            else:
+                step_label = expected_label
+
+            y_true_cat.append(step_label)
             y_pred_cat.append(pred_bin)
-            y_true_all.append(expected_label)
+            y_true_all.append(step_label)
             y_pred_all.append(pred_bin)
 
             # Imputation error measurement during fault injection
-            if expected_label == 1:
+            if step_label == 1:
                 clean_t = raw["clean_ground_truth"]["temperature"]
                 imp_t = res["imputed"]["temperature"]
                 if clean_t is not None and imp_t is not None:
@@ -143,8 +165,9 @@ def run_comprehensive_benchmark():
     # Generate Markdown Report
     report_content = f"""# SkyGuard AI — Quantitative Benchmark Evaluation Report
 
-**Evaluation Date**: {time.strftime('%Y-%m-%d %H:%M:%S')}  
-**Total Processed Observations**: {len(y_true_all)}  
+**Evaluation Date**: {time.strftime('%Y-%m-%d %H:%M:%S')}
+**Random Seed**: {seed} (deterministic -- re-run with `--seed {seed}` to reproduce exactly)
+**Total Processed Observations**: {len(y_true_all)}
 **Architecture**: Physics-Informed ML Ensemble (Magnus-Tetens + Autoencoder + Isolation Forest + CUSUM + Welford)
 
 ---
@@ -171,9 +194,10 @@ def run_comprehensive_benchmark():
 
 ## 3. Key Findings
 
-1. **Zero False Alarm Rate on Severe Thunderstorms**: Successfully distinguishes genuine natural extreme convective weather events from sensor faults using thermodynamic coupling analysis ($T$ drop synchronized with $RH$ saturation surge and pressure jump).
+1. **Thunderstorm False Alarm Rate**: {storm_far:.2f}% of steps during a genuine, gradually-intensifying convective storm were misclassified as a sensor fault ({'meets' if storm_far <= 2.0 else 'does NOT yet meet'} the < 2.0% target). Root cause: the CUSUM drift detector cannot distinguish "the sensor is drifting" from "the weather is genuinely trending" from a single station's own time series alone during the slow ramp-in of an event, before the root-cause classifier's genuine-weather gate ($RH > 78\\%$ or a confirmed cooling trend) is satisfied. See the cross-station spatial consistency check for the mitigation.
 2. **Sub-millisecond Real-Time Processing**: Pipeline latency of **{avg_latency:.2f} ms** satisfies high-throughput edge and central gateway streaming constraints.
 3. **Continuous Data Continuity**: Self-healing imputer delivers physically valid reconstructions with an average error of only **{mean_imputation_mae:.2f} °C**.
+4. **Reproducibility**: This run used a fixed random seed ({seed}); results are deterministic and will reproduce exactly on re-run rather than varying between executions.
 """
 
     with open("benchmark/evaluation_report.md", "w") as f:
@@ -191,4 +215,7 @@ def run_comprehensive_benchmark():
 
 
 if __name__ == "__main__":
-    run_comprehensive_benchmark()
+    parser = argparse.ArgumentParser(description="SkyGuard AI benchmark evaluation")
+    parser.add_argument("--seed", type=int, default=DEFAULT_SEED, help="Random seed for reproducible results")
+    args = parser.parse_args()
+    run_comprehensive_benchmark(seed=args.seed)
