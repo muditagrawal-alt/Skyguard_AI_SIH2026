@@ -104,10 +104,46 @@ class RootCauseClassifier:
                     if hum is not None and hum > 75.0:
                         recent_drops = True
 
+            # Coordinated short-window trend: temperature falling AND humidity rising
+            # together over a short recent lookback. This is the real thermodynamic
+            # signature of an approaching front/storm (cooling + moistening happen
+            # together), and it triggers much earlier in a slow-onset event than
+            # waiting for `recent_drops`'s larger 10-step/0.5C or 75% RH thresholds --
+            # closing the window where the statistical CUSUM filter (which reacts to
+            # ANY sustained one-directional trend, by design) flags the ramp-in before
+            # the classifier below recognizes it as weather. Requiring BOTH directions
+            # together, not just one, is what keeps this from misfiring on the other
+            # synthetic fault types: "spike" always raises temp while lowering humidity
+            # (opposite direction), single-sensor "drift" only moves one variable, and
+            # "physics_violation" raises both temp and humidity together (not one up
+            # one down) -- none of them produce this specific coordinated signature.
+            # Two tiers: a short window catches a fast-onset event quickly, but a real
+            # storm's rate of change decelerates as it matures (this generator's ramp
+            # follows a sine curve that saturates), so a short window alone stops firing
+            # once the per-step rate drops even though the storm is still clearly in
+            # progress. A longer window with a proportionally larger cumulative
+            # threshold catches that decelerating-but-still-elevated tail, without
+            # tripping on ordinary diurnal cycling (a 30-minute diurnal swing on this
+            # generator's largest profile range is well under 1C / 2% RH, safely below
+            # both thresholds below).
+            coordinated_trend = False
+            for lookback, temp_thresh, hum_thresh in ((6, -0.15, 3.0), (30, -1.5, 8.0)):
+                if len(temporal_window) < lookback:
+                    continue
+                t_then = temporal_window[-lookback].get("raw", {}).get("temperature")
+                h_then = temporal_window[-lookback].get("raw", {}).get("humidity")
+                if t_then is not None and h_then is not None and temp is not None and hum is not None:
+                    if (temp - t_then) < temp_thresh and (hum - h_then) > hum_thresh:
+                        coordinated_trend = True
+                        break
+
             # Convective Thunderstorm / Cold Front signature:
             # - No thermodynamic bounds broken (T >= Td)
             # - Saturated / high humidity (> 75%) with recent cooling or rain downdraft
-            is_convective_storm = len(hard_violations) == 0 and (recent_drops or (hum is not None and hum > 78.0))
+            # - OR a coordinated short-window cooling+moistening trend already underway
+            is_convective_storm = len(hard_violations) == 0 and (
+                recent_drops or coordinated_trend or (hum is not None and hum > 78.0)
+            )
 
             # Cross-station spatial consistency: a CUSUM/statistical filter alone cannot
             # tell "the sensor is drifting" from "the weather is genuinely, gradually
