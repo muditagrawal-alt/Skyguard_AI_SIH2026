@@ -65,11 +65,11 @@ MAX_STEPS_PER_STATION = 1500
 # single-station statistical tuning.
 INJECTION_CYCLE = [
     {"type": None, "steps": 80},
-    {"type": "spike", "sensor": "temperature", "intensity": 2.0, "steps": 20},
+    {"type": "spike", "sensor": "temperature", "intensity": 2.5, "steps": 20},
     {"type": None, "steps": 60},
     {"type": "flatline", "sensor": "temperature", "intensity": 1.0, "steps": 20},
     {"type": None, "steps": 60},
-    {"type": "drift", "sensor": "temperature", "intensity": 1.0, "steps": 20},
+    {"type": "drift", "sensor": "temperature", "intensity": 25.0, "steps": 20},
     {"type": None, "steps": 60},
     {"type": "physics_violation", "sensor": "all", "intensity": 1.0, "steps": 15},
     {"type": None, "steps": 60},
