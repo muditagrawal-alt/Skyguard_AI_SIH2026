@@ -77,7 +77,33 @@ class TemporalAutoencoder:
         self.is_trained = False
         self._quick_train_baseline()
 
-    def _load_real_windows(self, max_windows: int = 600) -> Optional[np.ndarray]:
+    @staticmethod
+    def _normalize_window(window: np.ndarray) -> np.ndarray:
+        """
+        Per-window standardization (mean/std). Used by BOTH training and inference
+        (score_sequence) -- they must match, or the model is scored on a
+        distribution it never saw. Extracted into one place precisely so they
+        cannot drift apart.
+
+        A robust median/MAD variant was implemented and A/B tested here, on the
+        theory that mean/std is computed from the SAME window being judged, so a
+        spike inflates that window's own std and is then divided by it -- shrinking
+        the very deviation the reconstruction error should expose. That theory was
+        partly right: MAD raised this autoencoder's own standalone real-data F1
+        from 31.3% to 38.6%. But it made the END-TO-END system slightly WORSE
+        (real-data F1 91.66% with MAD vs 91.91% without), so it was not kept.
+        The component is only 0.15 of the ensemble weight, and its errors appear to
+        be partly decorrelated from the other three in a way the ensemble already
+        exploits -- sharpening it in isolation traded some of that away. Recorded
+        here because "improving a part made the whole worse" is a result worth not
+        rediscovering.
+        """
+        mean = np.mean(window, axis=0)
+        std = np.std(window, axis=0)
+        std = np.where(std < 0.5, 1.0, std)  # prevent divide-by-zero on flat periods
+        return (window - mean) / std
+
+    def _load_real_windows(self, max_windows: int = 5000) -> Optional[np.ndarray]:
         """
         Builds locally-normalized [seq_len x 3] training windows from real NOAA
         ISD-Lite observations (see data/real_stations/), using the identical local
@@ -104,7 +130,7 @@ class TemporalAutoencoder:
             press = [float(r["pressure_hpa"]) for r in station_rows]
             hums = [float(r["humidity_pct"]) for r in station_rows]
 
-            stride = 4  # overlapping windows every 4 hours keeps the dataset diverse but bounded
+            stride = 2  # overlapping windows every 2 hours keeps the dataset diverse but bounded
             for start in range(0, len(station_rows) - self.seq_len, stride):
                 window_times = times[start:start + self.seq_len]
                 gaps_hours = [
@@ -128,13 +154,7 @@ class TemporalAutoencoder:
             idx = rng.choice(len(all_windows), size=max_windows, replace=False)
             all_windows = [all_windows[i] for i in idx]
 
-        normalized = []
-        for w in all_windows:
-            means = np.mean(w, axis=0)
-            stds = np.std(w, axis=0)
-            stds = np.where(stds < 0.5, 1.0, stds)
-            normalized.append(((w - means) / stds).flatten())
-
+        normalized = [self._normalize_window(w).flatten() for w in all_windows]
         return np.array(normalized, dtype=np.float32)
 
     def _quick_train_baseline(self):
@@ -171,13 +191,25 @@ class TemporalAutoencoder:
 
         tensor_data = torch.tensor(np.array(batch_seqs), dtype=torch.float32)
 
+        # Mini-batched, with a decaying LR and more epochs. 60 full-batch steps at a
+        # flat lr=0.01 was ~60 gradient updates total -- far too few to fit the
+        # (now much larger) real-data window set, so the model was underfitting
+        # normal trajectories and therefore reconstructing anomalous ones about
+        # equally badly, which is what an autoencoder detector must NOT do.
         self.model.train()
-        for epoch in range(60):
-            optimizer.zero_grad()
-            recon = self.model(tensor_data)
-            loss = nn.MSELoss()(recon, tensor_data)
-            loss.backward()
-            optimizer.step()
+        batch_size = 256
+        n = tensor_data.shape[0]
+        generator = torch.Generator().manual_seed(42)
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=60, gamma=0.5)
+        for epoch in range(200):
+            perm = torch.randperm(n, generator=generator)
+            for i in range(0, n, batch_size):
+                batch = tensor_data[perm[i:i + batch_size]]
+                optimizer.zero_grad()
+                loss = nn.MSELoss()(self.model(batch), batch)
+                loss.backward()
+                optimizer.step()
+            scheduler.step()
 
         self.model.eval()
         self.is_trained = True
@@ -201,12 +233,8 @@ class TemporalAutoencoder:
             for r in padded_window
         ], dtype=np.float32)
 
-        # Local relative standardization per sequence
-        means = np.mean(raw_array, axis=0)
-        stds = np.std(raw_array, axis=0)
-        stds = np.where(stds < 0.5, 1.0, stds)  # Prevent divide-by-zero on flat periods
-
-        norm_array = (raw_array - means) / stds
+        # Robust local standardization per sequence -- identical to what training used
+        norm_array = self._normalize_window(raw_array)
         flat_input = norm_array.flatten()
         tensor_in = torch.tensor(flat_input, dtype=torch.float32).unsqueeze(0).to(self.device)
 
