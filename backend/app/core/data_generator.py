@@ -298,8 +298,14 @@ class VirtualAWSNetworkSimulator:
 
                 # Temperature drops -8°C
                 raw_temp -= 8.0 * math.sin(progress * math.pi / 2.0)
-                # Humidity jumps to 96%
+                # Humidity jumps to 96%, saturating at 98% on humid profiles (e.g. the
+                # coastal station's ~82% baseline). A hard min() clamp alone holds
+                # humidity at an EXACT repeated float once saturated -- indistinguishable
+                # from a stuck sensor to the flatline detector. Real saturated/foggy air
+                # still has measurement noise, so re-apply a small noise term after the
+                # clamp rather than let a synthetic ceiling look like a hardware fault.
                 raw_hum = min(98.0, raw_hum + 35.0 * math.sin(progress * math.pi / 2.0))
+                raw_hum = max(0.0, min(100.0, raw_hum + random.gauss(0.0, 0.06)))
                 # Pressure surges +2.8 hPa (gust front nose)
                 raw_pres += 2.8 * math.sin(progress * math.pi)
 
