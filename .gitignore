@@ -1,9 +1,24 @@
+# Python bytecode & cache
 __pycache__/
 *.py[cod]
 *$py.class
 .pytest_cache/
+
+# Virtual Environments
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Operating System & IDE files
 .DS_Store
 *.log
-.venv/
-venv/
-ENV/
+.vscode/
+.idea/
+
+# Distribution / Packaging
+build/
+dist/
+*.egg-info/
