@@ -7,6 +7,7 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
 
 from backend.app.core.physics import physics_engine
+from backend.app.core.climatology import station_climatology
 from backend.app.models.statistical import statistical_engine
 from backend.app.models.isolation_forest import multivariate_detector
 from backend.app.models.autoencoder import temporal_autoencoder
@@ -121,12 +122,49 @@ class SkyGuardPipeline:
         # generic defaults here would otherwise corrupt station-specific baselines (e.g.
         # a ~785 hPa mountain station or ~34C desert station) with a fake 25C/1000hPa/60%
         # reading every time a packet drops.
+        #
+        # Real-data replay only: feed the statistical engine a deseasonalized residual
+        # (raw - this hour's real historical climatological mean) instead of the raw
+        # value. CUSUM accumulates evidence from any sustained deviation from a slowly-
+        # adapting mean, which is right for catching genuine drift but was measured to
+        # misfire constantly on real hourly data -- real diurnal swings run ~10-11C at
+        # these stations and look exactly like a sustained one-directional shift for
+        # several consecutive hours every single day. Subtracting "what's normal for
+        # this hour" removes that confound; real calibration drift, unlike ordinary
+        # diurnal warming, does not follow the diurnal shape, so it stands out in the
+        # residual instead of being swamped by it. Gated explicitly on data_source
+        # (set only by generate_next_reading_from_real) rather than auto-detected, so
+        # the synthetic path -- already tuned to 95% F1 -- is untouched.
+        stat_temp, stat_pres, stat_hum = temp, pres, hum
+        is_deseasonalized = False
+        if raw_packet.get("data_source") == "NOAA_ISD_REAL" and station_climatology.has_climatology(station_id):
+            hour = raw_packet.get("simulated_hour", 12.0)
+            if temp is not None:
+                exp = station_climatology.expected(station_id, hour, "temperature")
+                if exp is not None:
+                    stat_temp = temp - exp
+                    is_deseasonalized = True
+            if pres is not None:
+                exp = station_climatology.expected(station_id, hour, "pressure")
+                if exp is not None:
+                    stat_pres = pres - exp
+                    is_deseasonalized = True
+            if hum is not None:
+                exp = station_climatology.expected(station_id, hour, "humidity")
+                if exp is not None:
+                    stat_hum = hum - exp
+                    is_deseasonalized = True
+
         stat_res = statistical_engine.process(
             station_id=station_id,
-            temp_c=temp,
-            pressure_hpa=pres,
-            humidity_pct=hum,
-            dt_seconds=dt_seconds
+            temp_c=stat_temp,
+            pressure_hpa=stat_pres,
+            humidity_pct=stat_hum,
+            dt_seconds=dt_seconds,
+            raw_temp_c=temp,
+            raw_pressure_hpa=pres,
+            raw_humidity_pct=hum,
+            deseasonalized=is_deseasonalized
         )
 
         # 3. Multivariate Isolation Forest Outlier Scoring

@@ -124,17 +124,37 @@ class StatisticalEngine:
         self.flatline: Dict[str, Dict[str, FlatlineDetector]] = {}
         self.cusum: Dict[str, Dict[str, CUSUMDetector]] = {}
 
-    def _init_station(self, station_id: str):
+    def _init_station(self, station_id: str, deseasonalized: bool = False):
         if station_id not in self.baselines:
             self.baselines[station_id] = {
                 "temperature": AdaptiveRollingBaseline(alpha=0.20),
                 "pressure": AdaptiveRollingBaseline(alpha=0.20),
                 "humidity": AdaptiveRollingBaseline(alpha=0.20)
             }
+            # An exact repeat is a far rarer coincidence for real hourly sensor
+            # noise than for the synthetic generator's dense per-minute stream --
+            # two REAL readings landing on the identical float is already
+            # statistically unlikely, so real data doesn't need as many
+            # consecutive repeats to confirm a stuck sensor. Also structurally
+            # matters for recall: the detector cannot fire until the Nth
+            # identical reading, so N=5 eats 4 steps of any fault-injection
+            # window before detection is even possible; N=3 halves that cost.
+            # threshold_steps=3 was measured to false-trigger: a real 0.1C-rounded
+            # temperature reading during calm weather genuinely repeats 3x in a row
+            # by coincidence often enough to matter (confirmed directly in the real
+            # station data). 4 keeps most of the recall gain over the original 5
+            # (which costs 4 of every 20 fault-injection steps before it can even
+            # fire) while being rare enough as a genuine coincidence.
+            # Only lowered for temperature: pressure/humidity flatline false
+            # positives on clean real data were measured at the shared threshold
+            # (Alpha, Gamma) with no corresponding recall benefit, since nothing
+            # in this project's fault injectors targets those two sensors for
+            # flatline -- lowering their threshold was pure false-positive risk.
+            temp_flatline_threshold = 4 if deseasonalized else 5
             self.flatline[station_id] = {
-                "temperature": FlatlineDetector(),
-                "pressure": FlatlineDetector(),
-                "humidity": FlatlineDetector()
+                "temperature": FlatlineDetector(threshold_steps=temp_flatline_threshold),
+                "pressure": FlatlineDetector(threshold_steps=5),
+                "humidity": FlatlineDetector(threshold_steps=5)
             }
             self.cusum[station_id] = {
                 "temperature": CUSUMDetector(),
@@ -144,9 +164,32 @@ class StatisticalEngine:
 
     def process(
         self, station_id: str, temp_c: Optional[float], pressure_hpa: Optional[float],
-        humidity_pct: Optional[float], dt_seconds: float = 1.0
+        humidity_pct: Optional[float], dt_seconds: float = 1.0,
+        raw_temp_c: Optional[float] = None, raw_pressure_hpa: Optional[float] = None,
+        raw_humidity_pct: Optional[float] = None, deseasonalized: bool = False
     ) -> Dict[str, Any]:
         """
+        `deseasonalized`: True when temp_c/pressure_hpa/humidity_pct are already a
+        residual against a real climatological hourly baseline (pipeline.py's
+        real-data path), not a raw reading. cusum_slack_scale's whole job is
+        suppressing CUSUM accumulation on ordinary diurnal persistence in RAW
+        values -- ordinary persistence a deseasonalized residual shouldn't carry
+        much of, since the mean diurnal shape was already subtracted upstream.
+        Applying the same dt-based slack widening on top of an input that's
+        already had its main confound removed double-suppresses sensitivity for
+        no remaining benefit; skips it here instead.
+
+        `raw_*`: the actual sensor reading, used ONLY for flatline detection
+        (an exact repeated value). Defaults to temp_c/pressure_hpa/humidity_pct
+        when not given, so callers that pass a single value for both purposes
+        (the synthetic path, and any direct caller) are unaffected. Needed
+        because pipeline.py's real-data path passes a deseasonalized residual as
+        temp_c/pressure_hpa/humidity_pct (see its own docstring on why) -- a
+        genuinely stuck sensor produces an exact repeated RAW value, but the
+        residual against it changes every hour as the diurnal expectation moves,
+        even though the sensor hasn't. Checking flatline on the residual would
+        make a real stuck sensor look like it's still reporting fine.
+
         `dt_seconds`: elapsed time since the previous reading. Every synthetic-path
         caller (tests, benchmark, UI, API) passes dt_seconds=1.0, which is this
         filter's implicit no-scaling reference point (not the diurnal clock's
@@ -170,13 +213,18 @@ class StatisticalEngine:
         drift still needs to be catchable within a plausible detection window, and
         an unbounded scale-up (60x under a naive sqrt(3600)) makes that impossible.
         """
-        self._init_station(station_id)
-        cusum_slack_scale = min(3.0, 1.0 + math.log10(max(dt_seconds, 1.0)))
+        self._init_station(station_id, deseasonalized=deseasonalized)
+        cusum_slack_scale = 1.3 if deseasonalized else min(3.0, 1.0 + math.log10(max(dt_seconds, 1.0)))
 
         readings = {
             "temperature": temp_c,
             "pressure": pressure_hpa,
             "humidity": humidity_pct
+        }
+        raw_readings = {
+            "temperature": raw_temp_c if raw_temp_c is not None else temp_c,
+            "pressure": raw_pressure_hpa if raw_pressure_hpa is not None else pressure_hpa,
+            "humidity": raw_humidity_pct if raw_humidity_pct is not None else humidity_pct
         }
 
         z_scores = {}
@@ -189,8 +237,9 @@ class StatisticalEngine:
             if val is None:
                 continue
 
-            # Update Flatline Detector
-            is_flat, f_score = self.flatline[station_id][sensor].update(val)
+            # Update Flatline Detector (on the RAW reading, not `val` -- see docstring)
+            raw_val = raw_readings[sensor]
+            is_flat, f_score = self.flatline[station_id][sensor].update(raw_val)
             flatline_scores.append(f_score)
             if is_flat:
                 flatline_flags.append(f"{sensor.capitalize()} sensor flatline / invariant float detected")
