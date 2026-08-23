@@ -138,7 +138,7 @@ class RootCauseClassifier:
             # generator's largest profile range is well under 1C / 2% RH, safely below
             # both thresholds below).
             coordinated_trend = False
-            for lookback, temp_thresh, hum_thresh in ((6, -0.15, 3.0), (30, -1.5, 8.0)):
+            for lookback, temp_thresh, hum_thresh in ((6, -0.15, 3.0), (30, -1.2, 6.0)):
                 if len(temporal_window) < lookback:
                     continue
                 t_then = temporal_window[-lookback].get("raw", {}).get("temperature")
