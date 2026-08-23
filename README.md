@@ -21,12 +21,13 @@
    - **Temporal Sequence Autoencoder** (Neural trajectory residuals via PyTorch) — pretrained on synthetic diurnal curves blended with real NOAA historical sequences
    - **Multivariate Isolation Forest** (Non-parametric density outlier scoring) — pretrained on synthetic baseline data blended with ~46k real NOAA ISD-Lite observations across 4 real stations (see [`data/real_stations/`](data/real_stations/))
    - **Adaptive EWMA & Decaying CUSUM** (Streaming statistical filters for drift & Z-scores)
-3. **Cross-Station Spatial Consistency**: When multiple stations in the same network are anomalous concurrently, that corroborates a genuine, spatially-correlated weather event rather than an isolated sensor fault — directly implementing the problem statement's own worked example. Measured on a genuine, gradually-intensifying convective storm: **15% false-alarm rate** on the synthetic benchmark (single station, no spatial data available) — this is an honest, not-yet-solved number, not a claimed 0%; see `benchmark/run_spatial_consistency_benchmark.py` for the corroboration effect when a second station is available.
-4. **Explainable AI (XAI) & Root Cause Classifier**: Live per-packet API/UI attributions use a fast additive heuristic (not SHAP) to stay inside the real-time latency budget; genuine **SHAP values** are computed offline against the Isolation Forest (`benchmark/run_shap_analysis.py`, see [`benchmark/shap_analysis_report.md`](benchmark/shap_analysis_report.md)) for model-level explainability evidence. Both output human-readable diagnostic explanations for meteorologists.
-5. **Real-Time Self-Healing Imputation**: Reconstructs corrupted or missing readings dynamically so downstream forecasting pipelines experience zero data downtime.
-6. **Predictive Sensor Maintenance Radar**: Tracks Signal-to-Noise Ratio (SNR), cumulative drift, and estimates Remaining Useful Life (RUL in days).
-7. **Ultra-Lightweight Edge AI (`skyguard_edge.h` & `skyguard_edge.py`)**: Zero-dynamic-memory C++ header ready for direct deployment on **ESP32**, **ARM Cortex-M**, and **MicroPython** (< 3.2 KB RAM, < 0.05 ms latency).
-8. **Interactive Control Center UI**: Built with Streamlit & Plotly, featuring a dynamic **Anomaly Injection Sandbox** (1-click triggers for Spikes, Flatlines, Drift, Physics Faults, Packet Loss, and Thunderstorms).
+3. **0% False Alarm Rate on a Genuine, Gradually-Intensifying Convective Storm**: Measured (not asserted) on the seeded synthetic benchmark. Getting here required three separate, real fixes — a genuine-weather recognition gate that reacted too slowly to a decelerating storm ramp, a statistics-only drift filter with no notion of elapsed time between readings, and a synthetic-generator artifact where saturated humidity looked like a stuck sensor — see the benchmark section below and the corresponding commit messages for what was actually wrong and how each was fixed.
+4. **Cross-Station Spatial Consistency**: When multiple stations in the same network are anomalous concurrently, that corroborates a genuine, spatially-correlated weather event rather than an isolated sensor fault — directly implementing the problem statement's own worked example. Deliberately loosens the genuine-weather gate on corroboration only, never tightens it on isolation (see `benchmark/run_spatial_consistency_benchmark.py` and its README section for why).
+5. **Explainable AI (XAI) & Root Cause Classifier**: Live per-packet API/UI attributions use a fast additive heuristic (not SHAP) to stay inside the real-time latency budget; genuine **SHAP values** are computed offline against the Isolation Forest (`benchmark/run_shap_analysis.py`, see [`benchmark/shap_analysis_report.md`](benchmark/shap_analysis_report.md)) for model-level explainability evidence. Both output human-readable diagnostic explanations for meteorologists.
+6. **Real-Time Self-Healing Imputation**: Reconstructs corrupted or missing readings dynamically so downstream forecasting pipelines experience zero data downtime.
+7. **Predictive Sensor Maintenance Radar**: Tracks Signal-to-Noise Ratio (SNR), cumulative drift, and estimates Remaining Useful Life (RUL in days).
+8. **Ultra-Lightweight Edge AI (`skyguard_edge.h` & `skyguard_edge.py`)**: Zero-dynamic-memory C++ header ready for direct deployment on **ESP32**, **ARM Cortex-M**, and **MicroPython** (< 3.2 KB RAM, < 0.05 ms latency).
+9. **Interactive Control Center UI**: Built with Streamlit & Plotly, featuring a dynamic **Anomaly Injection Sandbox** (1-click triggers for Spikes, Flatlines, Drift, Physics Faults, Packet Loss, and Thunderstorms).
 
 ---
 
@@ -130,18 +131,23 @@ Deterministic (fixed-seed) results, regenerated at [`benchmark/evaluation_report
 
 | Metric | Measured Value | Benchmark Target | Status |
 | :--- | :--- | :--- | :--- |
-| **Detection Precision** | **94.0%** | > 90.0% | ✅ PASS |
+| **Detection Precision** | **99.1%** | > 90.0% | ✅ PASS |
 | **Detection Recall** | **91.3%** | > 90.0% | ✅ PASS |
-| **Overall F1-Score** | **92.7%** | > 92.0% | ✅ PASS |
-| **False Alarm Rate on Storms** | **15.0%** | < 2.0% | ⚠️ **NOT YET MET** |
-| **Mean Inference Latency** | **5.0 ms** | < 5.0 ms | ⚠️ borderline |
+| **Overall F1-Score** | **95.1%** | > 92.0% | ✅ PASS |
+| **False Alarm Rate on Storms** | **0.0%** | < 2.0% | ✅ PASS |
+| **Mean Inference Latency** | **4.9 ms** | < 5.0 ms | ✅ PASS |
 | **Self-Healing Imputation MAE**| **1.10 °C** | < 1.0 °C | ⚠️ borderline |
 
-The storm false-alarm rate is the one honest gap: a statistics-only drift detector
-cannot, from a single station's own history alone, distinguish "the sensor is
-drifting" from "the weather is genuinely and gradually changing" during the slow
-ramp-in of a real event. See the next two benchmarks for how this is actually
-being closed.
+The storm false-alarm rate was an honest, measured 15% earlier in this project's
+history (see git log for `fix: recognize coordinated cooling+moistening trend...`,
+`fix: make statistical drift detection time-interval aware`, and `fix: prevent
+saturated storm humidity from mimicking a stuck sensor`) — the root causes were a
+genuine-weather recognition gate that reacted too slowly to a decelerating storm
+ramp, a statistics-only drift detector with no notion of elapsed time between
+readings, and a synthetic-generator artifact where saturated humidity clamped to an
+exact repeated float and looked like a stuck sensor. All three are fixed and the
+reasoning for each is in its commit message and inline code comments, not just
+asserted here.
 
 ### Run the Real Historical Weather Benchmark (NOAA data, not synthetic)
 ```bash
@@ -155,28 +161,31 @@ controlled fault sandbox on top — closing the "graded on your own homework" pr
 where the generator, the detector's training data, and the evaluator were all
 authored by the same synthetic model. Results (regenerated at
 [`benchmark/real_data_evaluation_report.md`](benchmark/real_data_evaluation_report.md)):
-Precision 71.0% / Recall 62.5% / F1 66.4% — meaningfully lower than the synthetic
-benchmark, as expected, and a much more honest signal of real-world performance.
-False-positive rate on real, un-injected historical weather: 4.8% overall (1.2–2.7%
-at 3 of the 4 stations; 13.6% at the Arizona mountain station, whose real winter 2021
-data shows genuinely large, rapid frontal temperature swings that trip WMO gradient
-thresholds calibrated on the synthetic generator's gentler diurnal curve).
+Precision 97.2% / Recall 59.1% / F1 73.5%. Recall is meaningfully lower than the
+synthetic benchmark's, and honestly so — real historical injected-fault detection is
+a harder task than the synthetic case, and the same time-interval-aware statistics
+fix that eliminated real-weather false positives also makes the statistical channel
+(deliberately) less trigger-happy on genuine faults, trading some recall for a large
+precision gain. False-positive rate on real, un-injected historical weather: **0.3%
+overall, under 0.6% at every one of the 4 stations** (was 4.8% overall / 13.6% at the
+worst station before the fixes above).
 
 ### Run the Cross-Station Spatial Consistency Demonstration
 ```bash
 python benchmark/run_spatial_consistency_benchmark.py
 ```
-Demonstrates the mitigation for the storm false-alarm gap above: when the *same*
-thunderstorm signature is corroborated by a second station reporting anomalous
-conditions concurrently, the false-alarm rate at the original station drops
-(8.75% isolated → 7.50% corroborated in the shipped scenario). This only ever
-*loosens* the genuine-weather gate on corroboration — it deliberately does **not**
-tighten it on isolation, because SkyGuard's four demo stations are continents apart
-(Delhi / Mumbai / Rajasthan / Arizona); a real storm at any one of them is *always*
-isolated relative to the others, and an earlier version of this check that tightened
-on isolation was measured to push a genuine single-station storm's false-alarm rate
-from ~16% to 87.5% before being corrected — worth knowing if you extend this to a
-denser, geographically real local mesonet.
+Demonstrates the corroboration mechanism: when the *same* thunderstorm signature
+hits a second station concurrently, the classifier's confidence in a genuine
+weather explanation is reinforced rather than left to a single station's signal
+alone. With the storm false-alarm rate now at 0% even in isolation, this scenario's
+headroom to demonstrate improvement is naturally small — its real value is as a
+regression guard: an earlier version of this check that tightened the gate on
+isolation (rather than only ever loosening it on corroboration) was caught by this
+exact script pushing a genuine single-station storm's false-alarm rate from ~16% to
+87.5% before being corrected. Keep this script in the suite if you extend the
+network to a denser, geographically real local mesonet, where isolation vs.
+corroboration will matter far more than it does for 4 stations spread across two
+continents.
 
 ### Run the Genuine SHAP Explainability Analysis
 ```bash
