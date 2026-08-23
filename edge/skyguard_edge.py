@@ -56,6 +56,26 @@ class MicroEdgeGuard:
             self.last_temp = temp_c
             self.flatline_count = 1
 
+        # 5. Online Welford Z-Score drift check (mirrors skyguard_edge.h's Welford
+        # update -- this Python module previously declared mean_t/m2_t but never
+        # used them, so it silently had no drift-detection tier at all while the
+        # C header did. Both are lifetime (unwindowed) statistics by design: this
+        # is a minimal, O(1)-memory edge tier meant to catch a sensor's calibration
+        # wandering off its long-run baseline, not to track short-term diurnal
+        # variation the way the central pipeline's adaptive EWMA baseline does.
+        self.count += 1
+        delta = temp_c - self.mean_t
+        self.mean_t += delta / self.count
+        delta2 = temp_c - self.mean_t
+        self.m2_t += delta * delta2
+
+        variance = (self.m2_t / self.count) if self.count > 1 else 1.0
+        std_dev = max(0.1, variance ** 0.5)
+        z = abs(temp_c - self.mean_t) / std_dev
+
+        if self.count > 10 and z > 3.8:
+            return {"is_anomaly": True, "confidence": 0.75, "type": "DRIFT", "td": td, "z_score": z}
+
         self.prev_temp = temp_c
         self.prev_pres = pressure_hpa
         self.prev_hum = humidity_pct
