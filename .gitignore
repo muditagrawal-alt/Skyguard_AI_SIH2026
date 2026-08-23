@@ -22,3 +22,8 @@ venv.bak/
 build/
 dist/
 *.egg-info/
+
+# Real station data: raw NOAA downloads are re-fetchable via
+# data/real_stations/fetch_and_process.py and not committed; the small
+# processed CSVs they produce ARE committed (see data/real_stations/processed/).
+data/real_stations/raw/
