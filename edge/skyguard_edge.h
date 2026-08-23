@@ -158,8 +158,9 @@ static inline void skyguard_edge_process(
         return;
     }
 
-    // 3. Thermodynamic Enthalpy Violation Check (T < Td or 50°C at 90% RH)
-    if (td > t + 0.5f || (t > 48.0f && rh > 85.0f)) {
+    // 3. Thermodynamic Enthalpy Violation Check (T < Td, or implied Td beyond Earth's
+    // highest reliably recorded dew point of ~35C at Dhahran, Saudi Arabia, 2003)
+    if (td > t + 0.5f || td > 36.0f) {
         result->is_anomaly = true;
         result->anomaly_confidence = 0.95f;
         result->severity = EDGE_SEVERITY_CRITICAL;

@@ -119,9 +119,13 @@ class PhysicsEngine:
             scores.append(min(1.0, abs(dew_point_depression) / 3.0))
 
         # 4. Extreme Wet-Bulb / Enthalpy Inconsistency
-        # E.g. T > 48°C with RH > 85% is physically impossible on Earth surface without massive barometric anomaly
-        if temp_c > 45.0 and humidity_pct > 80.0:
-            violations.append(f"Thermodynamic enthalpy violation: Unphysical combination of high temp ({temp_c:.1f}°C) and high humidity ({humidity_pct:.1f}%)")
+        # The highest dew point ever reliably recorded on Earth is ~35°C (Dhahran, Saudi
+        # Arabia, 2003). Flagging directly on the derived dew point (rather than an ad hoc
+        # T-and-RH threshold pair) is physically principled and scale-consistent across all
+        # temperature ranges, and reuses the same Magnus-Tetens inversion computed above.
+        record_dew_point_margin_c = 36.0
+        if td > record_dew_point_margin_c:
+            violations.append(f"Thermodynamic enthalpy violation: implied dew point ({td:.1f}°C) exceeds the highest dew point ever reliably recorded on Earth (~35°C)")
             scores.append(0.95)
 
         # 5. Gradient & Rate-of-Change Checks (if previous reading available)

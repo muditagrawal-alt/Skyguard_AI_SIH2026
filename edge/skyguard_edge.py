@@ -36,9 +36,9 @@ class MicroEdgeGuard:
         if temp_c < -40.0 or temp_c > 60.0 or pressure_hpa < 700.0 or pressure_hpa > 1100.0 or humidity_pct < 0.0 or humidity_pct > 102.0:
             return {"is_anomaly": True, "confidence": 1.0, "type": "OUT_OF_BOUNDS"}
 
-        # 2. Dew point check
+        # 2. Dew point check (record dew point on Earth is ~35C, Dhahran 2003)
         td = self.compute_dew_point(temp_c, humidity_pct)
-        if td > temp_c + 0.5 or (temp_c > 48.0 and humidity_pct > 85.0):
+        if td > temp_c + 0.5 or td > 36.0:
             return {"is_anomaly": True, "confidence": 0.95, "type": "PHYSICS_VIOLATION", "td": td}
 
         # 3. Rate of change (Spike)

@@ -96,5 +96,5 @@ where $Z_n = \frac{x_n - \mu_{\text{EWMA}}}{\sigma_{\text{EWMA}}}$, $k = 0.6$ (s
 | `SENSOR_SPIKE` | Sudden $\Delta T > 3^\circ\text{C}/\text{min}$ with zero $RH/P$ response | Electrostatic transient, power supply ripple |
 | `SENSOR_FLATLINE` | Identical float repeating for $\ge 5$ steps | ADC buffer freeze, firmware deadlock, icing |
 | `CALIBRATION_DRIFT` | CUSUM accumulation $> 3.5$ over time | Sensor aging, salt crusting, radiation shield dirt |
-| `PHYSICAL_INCONSISTENCY` | $T < T_d - 0.5^\circ\text{C}$ or $54^\circ\text{C}$ with $96\%$ RH | Transducer failure, corrupted calibration curves |
+| `PHYSICAL_INCONSISTENCY` | $T < T_d - 0.5^\circ\text{C}$ or implied $T_d > 36^\circ\text{C}$ (exceeds Earth's ~35°C record dew point) | Transducer failure, corrupted calibration curves |
 | `COMMUNICATION_DROPOUT`| Missing/null telemetry frames or random noise | Telemetry packet loss, weak cellular/LoRa signal |
