@@ -391,7 +391,7 @@ with col_xai:
             )
         ))
         fig_bar.update_layout(
-            title="SHAP / Feature Attribution Importance (%)",
+            title="Feature Attribution Importance (%) — fast heuristic, not SHAP (see benchmark/run_shap_analysis.py for real SHAP)",
             height=280,
             margin=dict(l=20, r=20, t=35, b=20),
             template="plotly_dark",

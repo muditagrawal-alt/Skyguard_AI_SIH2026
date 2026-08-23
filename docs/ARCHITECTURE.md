@@ -44,7 +44,8 @@ The core mission of **SkyGuard AI** is to distinguish between genuine, severe me
                          ▼                                                   ▼
 ┌───────────────────────────────────────────────────┐ ┌────────────────────────────────────────────┐
 │ Tier 3: Explainable AI & Root-Cause Diagnostics   │ │ Tier 4: Self-Healing Imputation Engine     │
-│ - SHAP / Additive Feature Attributions            │ │ - Multivariate Temporal Moving Average     │
+│ - Live: fast additive attribution heuristic       │ │ - Multivariate Temporal Moving Average     │
+│ - Offline: genuine SHAP (benchmark/run_shap_*.py) │ │                                              │
 │ - Multi-Class Fault Classifier (Spike, Flatline,  │ │ - Psychrometric Clamping Constraints       │
 │   Drift, Physics Violation, Convective Storm)     │ │ - Uninterrupted Data Stream for Downstream │
 │ - Natural Language Diagnostic Generator           │ │   Numerical Weather Prediction Models      │

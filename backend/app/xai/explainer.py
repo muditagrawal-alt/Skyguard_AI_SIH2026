@@ -1,6 +1,10 @@
 """
 SkyGuard AI - Explainable AI (XAI) Engine & Natural Language Reasoner
-Computes SHAP/additive feature attributions and generates human-readable diagnostic explanations.
+Computes a fast additive feature-attribution heuristic (NOT SHAP -- see
+benchmark/run_shap_analysis.py for genuine, offline-computed SHAP values against the
+Isolation Forest) and generates human-readable diagnostic explanations. This module
+trades explanation fidelity for speed: it must run inside the <10ms per-packet
+real-time budget, which a proper SHAP/LIME explainer cannot.
 """
 
 from typing import Dict, Any, List, Optional
