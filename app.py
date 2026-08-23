@@ -8,6 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import time
+from datetime import datetime
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
@@ -18,6 +19,52 @@ from backend.app.core.config import config
 from backend.app.core.data_generator import simulator, AnomalyInjectionRequest
 from backend.app.core.pipeline import pipeline
 from backend.app.models.isolation_forest import multivariate_detector
+
+REAL_DATA_DIR = Path(__file__).resolve().parent / "data" / "real_stations" / "processed"
+
+
+@st.cache_data
+def load_real_station_csv(station_id: str):
+    """
+    Real NOAA ISD-Lite history for one station (see data/real_stations/). Cached
+    across reruns -- Streamlit reruns this whole script on every interaction, and
+    these files run to tens of thousands of rows.
+    """
+    path = REAL_DATA_DIR / f"{station_id}.csv"
+    if not path.exists():
+        return None
+    return pd.read_csv(path)
+
+
+def step_station(station_id: str, dt_seconds_wallclock: float) -> dict:
+    """
+    Advances one station by one reading, in whichever data source mode is active,
+    and returns the processed packet. Real mode replays actual NOAA history
+    (looping once exhausted) and computes dt_seconds from the real gap between
+    consecutive timestamps -- not from the UI's playback-speed slider, which only
+    controls how fast the demo advances on screen, not what the model is told
+    about elapsed real time between readings.
+    """
+    if st.session_state.data_source == "real":
+        df = load_real_station_csv(station_id)
+        if df is not None and len(df) > 0:
+            cursor = st.session_state.real_cursors.get(station_id, 0) % len(df)
+            row = df.iloc[cursor]
+            st.session_state.real_cursors[station_id] = cursor + 1
+
+            prev_ts = st.session_state.real_prev_ts.get(station_id)
+            ts = datetime.fromisoformat(row["timestamp"])
+            dt_seconds = max(60.0, (ts - prev_ts).total_seconds()) if prev_ts else 3600.0
+            st.session_state.real_prev_ts[station_id] = ts
+
+            raw_packet = simulator.generate_next_reading_from_real(
+                station_id, float(row["temperature_c"]), float(row["pressure_hpa"]),
+                float(row["humidity_pct"]), row["timestamp"], dt_seconds=dt_seconds
+            )
+            return pipeline.process_reading(raw_packet, dt_seconds=dt_seconds)
+
+    raw_packet = simulator.generate_next_reading(station_id, dt_seconds=dt_seconds_wallclock)
+    return pipeline.process_reading(raw_packet, dt_seconds=dt_seconds_wallclock)
 
 # Page configuration
 st.set_page_config(
@@ -67,6 +114,14 @@ if "selected_station" not in st.session_state:
     st.session_state.selected_station = "AWS_ALPHA_MOUNTAIN"
 if "audit_log" not in st.session_state:
     st.session_state.audit_log = []
+if "data_source" not in st.session_state:
+    st.session_state.data_source = "real"
+if "real_cursors" not in st.session_state:
+    st.session_state.real_cursors = {}
+if "real_prev_ts" not in st.session_state:
+    st.session_state.real_prev_ts = {}
+if "network_status" not in st.session_state:
+    st.session_state.network_status = {}  # station_id -> latest processed packet, for the network overview
 
 
 # Sidebar Controls
@@ -74,6 +129,38 @@ with st.sidebar:
     st.image("https://img.icons8.com/fluency/96/radar.png", width=70)
     st.title("SkyGuard AI")
     st.caption("Intelligent Real-Time Anomaly Detection for AWS")
+    st.markdown("---")
+
+    # Data Source: real NOAA history as the clean background signal (with the
+    # anomaly injection sandbox below still layered on top of it), or the fully
+    # synthetic diurnal generator. Real is the credible default for demonstrating
+    # to evaluators; synthetic remains available since it's the only source with
+    # zero natural false-positive risk for a live, unattended demo.
+    st.subheader("🛰️ Data Source")
+    real_available = load_real_station_csv("AWS_GAMMA_URBAN") is not None
+    if real_available:
+        # key="data_source" binds this widget directly to st.session_state.data_source
+        # (already initialized above) -- Streamlit then owns tracking the current
+        # selection across reruns. An earlier version instead recomputed `index=`
+        # from session_state and manually wrote the widget's return value back to
+        # it each render; that fights Streamlit's own widget-state tracking on the
+        # very rerun that processes a click, so the radio visually snapped back to
+        # its previous value the moment ANY OTHER button on the page was clicked
+        # (confirmed live: clicking "Physics Fault" reset the radio to Synthetic).
+        st.radio(
+            "Background telemetry",
+            options=["real", "synthetic"],
+            format_func=lambda x: "🌍 Real NOAA History" if x == "real" else "🧪 Synthetic Generator",
+            key="data_source",
+            on_change=lambda: st.session_state.update(history=[]),
+            label_visibility="collapsed"
+        )
+        if st.session_state.data_source == "real":
+            st.caption("Replaying real hourly NOAA history. Injected faults (below) land on top of it, same as `benchmark/run_real_data_benchmark.py`.")
+    else:
+        st.session_state.data_source = "synthetic"
+        st.caption("Run `data/real_stations/fetch_and_process.py` to enable real NOAA replay.")
+
     st.markdown("---")
 
     # Station Selection
@@ -185,12 +272,28 @@ with inj_col6:
         st.toast("⛈️ Simulated Severe Convective Thunderstorm!")
 
 
-# Processing Step: If running or empty, step the simulation
+# Processing Step: If running or empty, step the simulation. Also steps the
+# OTHER three stations one reading each -- cheap (~5ms/reading) and what makes
+# cross-station spatial consistency (problem statement's own worked example:
+# "...while neighboring stations show normal conditions") an always-on part of
+# the live demo instead of something only visible after manually clicking
+# through every station. Their latest packets feed the Network Overview panel
+# below; only the selected station gets its full history/charts.
+#
+# Other stations step FIRST, selected station LAST: pipeline.py's spatial
+# consistency check reads the other stations' most-recently-processed packet at
+# the moment the selected station is scored, so stepping them first means this
+# cycle's neighbor data is what the selected station's own spatial_res reflects,
+# not last cycle's.
 if st.session_state.is_running or len(st.session_state.history) == 0:
-    raw_packet = simulator.generate_next_reading(st.session_state.selected_station, dt_seconds=sim_speed)
-    processed = pipeline.process_reading(raw_packet, dt_seconds=sim_speed)
+    for other_id in config.stations:
+        if other_id != st.session_state.selected_station:
+            st.session_state.network_status[other_id] = step_station(other_id, sim_speed)
+
+    processed = step_station(st.session_state.selected_station, sim_speed)
     st.session_state.history.append(processed)
-    
+    st.session_state.network_status[st.session_state.selected_station] = processed
+
     # Keep buffer length manageable
     if len(st.session_state.history) > 60:
         st.session_state.history.pop(0)
@@ -210,6 +313,47 @@ if st.session_state.is_running or len(st.session_state.history) == 0:
             "imputed_t": processed["imputed"]["temperature"],
             "explanation": processed["xai"]["explanation"]
         })
+
+
+# Network Overview: all 4 stations at a glance, click any card to drill in. This
+# is the direct visual answer to the problem statement's own example scenario --
+# "an AWS suddenly reports [an anomaly]... while neighboring stations show normal
+# conditions" -- rather than something only inferable by manually switching
+# stations one at a time and reading a caption.
+st.markdown("### 🛰️ Network Overview — All Stations")
+net_cols = st.columns(len(config.stations))
+for col, (sid, prof) in zip(net_cols, config.stations.items()):
+    pkt = st.session_state.network_status.get(sid)
+    with col:
+        is_selected = sid == st.session_state.selected_station
+        border_color = "#3b82f6" if is_selected else "rgba(255,255,255,0.08)"
+        if pkt is None:
+            card_body = "<div style='color:#64748b; font-size:13px;'>Not yet streamed</div>"
+        else:
+            t = pkt["raw"]["temperature"]
+            is_anom = pkt["ensemble"]["is_anomaly"]
+            is_weather = pkt["root_cause"]["is_genuine_weather"]
+            fault_type = pkt["root_cause"]["fault_type"]
+            if not is_anom:
+                pill = "<span class='status-badge-normal' style='font-size:11px;'>✅ NORMAL</span>"
+            elif is_weather:
+                pill = "<span class='status-badge-weather' style='font-size:11px;'>⛈️ WEATHER</span>"
+            else:
+                pill = f"<span class='status-badge-anomaly' style='font-size:11px;'>⚠️ {fault_type}</span>"
+            temp_str = f"{t:.1f}°C" if t is not None else "LOST"
+            card_body = f"<div style='font-size:22px; font-weight:700;'>{temp_str}</div>{pill}"
+        st.markdown(f"""
+        <div style='border:1.5px solid {border_color}; border-radius:10px; padding:12px;
+                    background:rgba(30,41,59,0.5); text-align:center; margin-bottom:4px;'>
+            <div style='font-size:12px; color:#94a3b8; margin-bottom:4px;'>{prof.station_type.upper()}</div>
+            <div style='font-size:13px; font-weight:600; margin-bottom:6px;'>{prof.name}</div>
+            {card_body}
+        </div>
+        """, unsafe_allow_html=True)
+        if not is_selected and st.button("View →", key=f"select_{sid}", use_container_width=True):
+            st.session_state.selected_station = sid
+            st.session_state.history = []
+            st.rerun()
 
 
 # Extract Latest Packet
