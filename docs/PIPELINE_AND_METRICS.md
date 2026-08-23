@@ -116,15 +116,15 @@ The full pipeline = 4-model ensemble **+** root-cause classification **+** spati
 
 | Metric | Synthetic generator | **Real NOAA history** |
 |---|---|---|
-| Precision | 99.12% | **96.09%** |
-| Recall | 92.56% | **88.08%** |
-| **F1-Score** | **95.73%** | **91.91%** |
-| False alarms | 0.00% *(on genuine storms)* | **0.67%** *(on real un-injected weather)* |
+| Precision | 99.12% | **96.43%** |
+| Recall | 92.56% | **88.29%** |
+| **F1-Score** | **95.73%** | **92.18%** |
+| False alarms | 0.00% *(on genuine storms)* | **0.61%** *(on real un-injected weather)* |
 | Mean latency | 4.925 ms | 5.331 ms |
 | Observations scored | 610 | 6,000 |
 
 > ### Which number should you quote?
-> **The real-data one — 91.91% F1.**
+> **The real-data one — 92.18% F1.**
 >
 > The synthetic figure is measured against data this codebase generates itself, with faults this
 > codebase injects, scored by an evaluator in the same repository. It is a useful *regression test*
@@ -132,6 +132,13 @@ The full pipeline = 4-model ensemble **+** root-cause classification **+** spati
 > replays genuine historical hourly weather as the background signal and injects the same
 > controlled faults on top, so its false-positive rate is measured against real, unmodelled
 > atmospheric variability. That is the honest estimate of field performance.
+>
+> **No train/test leakage.** The first 1,530 rows of every station file are a strict
+> evaluation holdout — the isolation forest, the autoencoder, and the hourly climatology are
+> all forbidden to train on them (`backend/app/core/data_split.py`, asserted at benchmark
+> import time so the two windows cannot drift apart). This was originally violated; fixing it
+> moved F1 by +0.1 points, because the two highest-weighted components — physics (0.45) and
+> statistical (0.20) — do not train on data at all.
 
 ### Per-station (real data)
 
@@ -216,6 +223,17 @@ of the tuning work in this project.
 4. **The C edge header has never been compiled.** `edge/skyguard_edge.h` is behaviourally consistent
    with its Python counterpart, but "ESP32-ready" is unverified without a PlatformIO build.
 5. **No CI.** Every check in this document was run manually.
+
+### Data-agnosticism
+
+The pipeline carries no assumptions about *which* station or *what kind* of data it is fed.
+Audited and fixed before shipping: hardcoded "typical value" fallbacks (25 °C / 1000 hPa / 60 %)
+that corrupted high-altitude and polar stations, physical bounds that were really mid-latitude
+lowland ranges (a legitimate −55 °C Antarctic reading was being clamped to −40 °C), a default
+station ID that merged unattributed packets into a real station's detection state, an imputer
+that fell back to another site's baseline profile, and a data-source name hardcoded into the
+deseasonalization gate. Verified end-to-end: an unknown station at −55 °C / 680 hPa now passes
+through untouched, while a broken sensor (300 °C, −5 hPa, RH 5000 %) is still caught.
 
 ---
 
