@@ -27,3 +27,7 @@ dist/
 # data/real_stations/fetch_and_process.py and not committed; the small
 # processed CSVs they produce ARE committed (see data/real_stations/processed/).
 data/real_stations/raw/
+
+# Local editor / IDE tooling configuration (not part of the project)
+.vscode/
+.idea/
