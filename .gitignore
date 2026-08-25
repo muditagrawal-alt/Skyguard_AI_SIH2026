@@ -12,6 +12,12 @@ ENV/
 env.bak/
 venv.bak/
 
+# Secrets & local environment (Groq/LLM API keys, etc.) — never commit.
+# `.env.example` is intentionally NOT matched here so it stays committable.
+.env
+.env.local
+.env.*.local
+
 # Operating System & IDE files
 .DS_Store
 *.log
