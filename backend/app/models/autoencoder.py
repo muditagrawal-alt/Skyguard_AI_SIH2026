@@ -178,12 +178,25 @@ class TemporalAutoencoder:
             t0 = np.random.uniform(0, 24)
             time_steps = np.linspace(t0, t0 + 1.5, self.seq_len)
 
-            # Synthetic normalized smooth curves
+            # Smooth synthetic diurnal curves. They span [-1, 1] by construction,
+            # but that is NOT the transform score_sequence() applies at inference:
+            # a real window is per-window mean/std standardized, which (among other
+            # things) subtracts its DC offset. A morning synthetic window sits near
+            # +1.0 in temperature (the sine value at that phase), so feeding it raw
+            # taught the model to reconstruct large, phase-dependent DC offsets that
+            # inference-time normalization always strips away -- a train/inference
+            # mismatch on exactly the synthetic half of the blend (the real half at
+            # _load_real_windows was already normalized). Pass the synthetic window
+            # through the SAME _normalize_window() the real-data path and inference
+            # both use, so all three share one distribution -- which is the entire
+            # reason that helper was extracted (see its docstring).
             temp_seq = np.sin(2 * np.pi * time_steps / 24.0) + np.random.normal(0, 0.05, self.seq_len)
             hum_seq = -np.sin(2 * np.pi * time_steps / 24.0) + np.random.normal(0, 0.05, self.seq_len)
             pres_seq = np.sin(4 * np.pi * time_steps / 24.0) * 0.3 + np.random.normal(0, 0.05, self.seq_len)
 
-            seq_matrix = np.column_stack([temp_seq, pres_seq, hum_seq]).flatten()
+            seq_matrix = self._normalize_window(
+                np.column_stack([temp_seq, pres_seq, hum_seq])
+            ).flatten()
             batch_seqs.append(seq_matrix)
 
         real_windows = self._load_real_windows()

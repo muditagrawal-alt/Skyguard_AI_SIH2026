@@ -25,7 +25,7 @@
 4. **Cross-Station Spatial Consistency**: When multiple stations in the same network are anomalous concurrently, that corroborates a genuine, spatially-correlated weather event rather than an isolated sensor fault — directly implementing the problem statement's own worked example. Deliberately loosens the genuine-weather gate on corroboration only, never tightens it on isolation (see `benchmark/run_spatial_consistency_benchmark.py` and its README section for why).
 5. **Explainable AI (XAI) & Root Cause Classifier**: Live per-packet API/UI attributions use a fast additive heuristic (not SHAP) to stay inside the real-time latency budget; genuine **SHAP values** are computed offline against the Isolation Forest (`benchmark/run_shap_analysis.py`, see [`benchmark/shap_analysis_report.md`](benchmark/shap_analysis_report.md)) for model-level explainability evidence. Both output human-readable diagnostic explanations for meteorologists.
 6. **Real-Time Self-Healing Imputation**: Reconstructs corrupted or missing readings dynamically so downstream forecasting pipelines experience zero data downtime.
-7. **Predictive Sensor Maintenance Radar**: Tracks Signal-to-Noise Ratio (SNR), cumulative drift, and estimates Remaining Useful Life (RUL in days).
+7. **Sensor Health & Maintenance Advisory**: Tracks each station's rolling hardware-fault rate and CUSUM calibration-drift scores to derive a live Sensor Health Index (0–100%), mapped to a coarse maintenance advisory band with a representative days-until-service figure. This is a heuristic, rule-based health tracker describing *present* condition — not a trained prognostic model, and the days figure is an advisory band, not an extrapolated failure forecast.
 8. **Ultra-Lightweight Edge AI (`skyguard_edge.h` & `skyguard_edge.py`)**: Zero-dynamic-memory C++ header ready for direct deployment on **ESP32**, **ARM Cortex-M**, and **MicroPython** (< 3.2 KB RAM, < 0.05 ms latency).
 9. **Interactive Control Center UI**: Built with Streamlit & Plotly, featuring a dynamic **Anomaly Injection Sandbox** (1-click triggers for Spikes, Flatlines, Drift, Physics Faults, Packet Loss, and Thunderstorms), a **Real NOAA / Synthetic Generator toggle** (real data as the live background signal by default, with the same injection sandbox layered on top), and a **Network Overview** showing all 4 stations concurrently — the direct visual answer to the problem statement's own example ("...while neighboring stations show normal conditions").
 
@@ -53,7 +53,7 @@ SkyGuard_AI/
 │   │   │   ├── explainer.py         # Fast additive feature attributions (not SHAP) & natural language reasoning
 │   │   │   └── root_cause.py        # Multi-class fault classification matrix
 │   │   └── maintenance/
-│   │       └── health_tracker.py    # Sensor drift, SNR, health score & RUL estimation
+│   │       └── health_tracker.py    # Fault-rate & CUSUM-drift health index + maintenance advisory
 │   └── tests/                       # Complete automated pytest test suite
 │       ├── conftest.py
 │       ├── test_physics.py

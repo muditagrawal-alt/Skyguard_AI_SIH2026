@@ -285,7 +285,16 @@ class VirtualAWSNetworkSimulator:
                 # Extreme unphysical thermodynamic state
                 raw_temp = 54.5  # Extreme heat
                 raw_hum = 96.0   # Extreme humidity (impossible enthalpy without massive pressure drop)
-                raw_pres = p.base_pressure_hpa  # Static pressure
+                # Pressure is deliberately left at its current ambient value so the
+                # fault is a pure T/RH thermodynamic violation, not a pressure event.
+                # This previously forced raw_pres = p.base_pressure_hpa, which is the
+                # station-LEVEL convention (785 hPa for the mountain profile). In the
+                # real-data replay path the same station streams NOAA sea-level
+                # pressure (~1013 hPa), so that assignment silently injected a ~228 hPa
+                # pressure CRASH on top of the intended thermodynamic fault -- tripping
+                # the gradient check and letting this category score on an artifact
+                # rather than the enthalpy violation it is meant to test. Leaving
+                # raw_pres untouched holds it static in BOTH conventions.
 
             elif itype == "packet_loss":
                 # Missing telemetry, or a corrupted-but-present transmission. Real

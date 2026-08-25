@@ -1,11 +1,27 @@
+# SkyGuard AI - Python dependencies
+#
+# Upper bounds on the scientific / ML stack are intentional, not accidental.
+# The benchmark metrics in the README and benchmark/*_report.md are seeded
+# (`--seed 42`) and quoted to a tenth of a percent, and the reproducibility
+# fixes documented in backend/app/models/autoencoder.py (torch.set_num_threads(1)
+# and the manual_seed ordering note) and isolation_forest.py assume specific
+# major-version behavior. A silent major-version bump of torch, scikit-learn,
+# scipy, pandas or numpy on a fresh `pip install` can change RNG streams,
+# estimator internals, or floating-point reduction order -- and therefore the
+# reported precision/recall/F1 -- without any code change. Each is capped below
+# its next major version; raise a cap deliberately and re-run the benchmarks to
+# re-baseline, rather than have it move on its own. pydantic is capped below v3
+# because the code relies on the v2 API (model_dump); the v1->v2 transition was
+# a hard break and v2->v3 may be another.
+
 # Core Data Science & Scientific Computing
 numpy>=1.24.0,<2.0.0
-pandas>=2.0.0
-scipy>=1.10.0
-scikit-learn>=1.3.0
+pandas>=2.0.0,<3.0.0
+scipy>=1.10.0,<2.0.0
+scikit-learn>=1.3.0,<2.0.0
 
 # Deep Learning & Sequence Models
-torch>=2.0.0
+torch>=2.0.0,<3.0.0
 
 # Explainable AI (XAI)
 shap>=0.42.0
@@ -13,7 +29,7 @@ shap>=0.42.0
 # Backend & APIs
 fastapi>=0.104.0
 uvicorn[standard]>=0.24.0
-pydantic>=2.4.0
+pydantic>=2.4.0,<3.0.0
 websockets>=12.0
 httpx>=0.25.0
 requests>=2.31.0

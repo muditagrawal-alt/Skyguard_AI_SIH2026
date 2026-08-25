@@ -1,7 +1,13 @@
 """
-SkyGuard AI - Predictive Sensor Maintenance & Health Radar Engine
-Tracks sensor Signal-to-Noise Ratio (SNR), drift accumulation, glitch frequencies,
-and calculates Sensor Health Index (0-100%) and Remaining Useful Life (RUL) advisory.
+SkyGuard AI - Sensor Health & Maintenance Advisory Engine
+Tracks rolling hardware-fault rate and CUSUM calibration-drift scores, derives a
+Sensor Health Index (0-100%), and maps it to a coarse maintenance advisory band.
+
+This is a heuristic, rule-based health tracker -- NOT a trained prognostic model.
+The reported "remaining useful life (RUL)" is a fixed lookup keyed on the current
+health band: a maintenance-planning aid describing PRESENT condition, not a failure
+date forecast extrapolated from a degradation model. The field name is kept
+(`estimated_rul_days`) for API/UI compatibility; interpret it as an advisory band.
 """
 
 from typing import Dict, Any, List, Optional
@@ -14,7 +20,6 @@ class SensorHealthState:
         self.total_observations = 0
         self.anomaly_count = 0
         self.flatline_count = 0
-        self.drift_accumulated = {"temperature": 0.0, "pressure": 0.0, "humidity": 0.0}
         self.recent_anomalies: List[bool] = []
         self.window_size = 100
 
@@ -88,8 +93,10 @@ class SensorHealthTracker:
 
         state.overall_health_score = round((score_t + score_p + score_rh) / 3.0, 1)
 
-        # Estimate RUL (Remaining Useful Life in days)
-        # 100% health -> 365 days; 50% health -> 45 days; <30% health -> Immediate maintenance
+        # Map the current health band to a coarse maintenance advisory and a
+        # representative days-until-service figure. This is a fixed lookup on
+        # PRESENT health, not a forecast: it means "a sensor in this condition band
+        # is typically serviced within N days", not "this sensor will fail on day N".
         if state.overall_health_score > 90:
             rul_days = 365
             maintenance_status = "OPTIMAL"
@@ -116,8 +123,19 @@ class SensorHealthTracker:
             "advisory": advisory,
             "estimated_rul_days": rul_days,
             "fault_rate_pct": round(fault_rate * 100.0, 1),
+            "flatline_count": state.flatline_count,
             "total_observations": state.total_observations
         }
+
+
+    def reset(self):
+        """
+        Clears all per-station health state. Like the other detectors this is a
+        module-level singleton, so a benchmark that builds a fresh SkyGuardPipeline()
+        per category would otherwise carry fault-rate/flatline history across
+        supposedly independent categories. Call between independent runs.
+        """
+        self.station_states.clear()
 
 
 sensor_health_tracker = SensorHealthTracker()

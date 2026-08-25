@@ -580,7 +580,7 @@ with col_xai:
         st.plotly_chart(fig_bar, use_container_width=True)
 
 with col_health:
-    st.subheader("🛡️ Predictive Sensor Health Radar")
+    st.subheader("🛡️ Sensor Health Radar")
     if latest:
         health = latest["sensor_health"]
         h_score = health["overall_health_score"]
@@ -610,7 +610,7 @@ with col_health:
         )
         st.plotly_chart(fig_gauge, use_container_width=True)
 
-        st.markdown(f"**Estimated Remaining Useful Life (RUL)**: `{rul_days} Days`")
+        st.markdown(f"**Maintenance advisory window**: `~{rul_days} days`")
         st.caption(f"Advisory: {health['advisory']}")
 
         # Sub-sensor health bars

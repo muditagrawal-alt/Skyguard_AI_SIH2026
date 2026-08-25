@@ -31,7 +31,7 @@ At `AWS_ALPHA_MOUNTAIN` (Elevation: 2,150 m), sub-zero moisture causes the mecha
 1. **Flatline Detector**: Flags invariant float after 5 consecutive identical readings.
 2. **XAI Diagnostic**: Outputs *"❄️ SENSOR FLATLINE DETECTED (Sensor Transducer / ADC Lockup). Constant float detected."*
 3. **Self-Healing Imputation**: Reconstructs the expected diurnal solar trajectory based on solar phase and historical trends.
-4. **Maintenance Tracker**: Updates sensor health index to `DEGRADED`, decrementing Remaining Useful Life (RUL) and recommending field inspection.
+4. **Maintenance Tracker**: Updates the sensor health index to `DEGRADED`, lowering its maintenance advisory band (a coarse days-to-service figure derived from current health, not a failure forecast) and recommending field inspection.
 
 ---
 

@@ -60,6 +60,14 @@ class SelfHealingImputer:
         # baseline -- a ~230 hPa fabricated error presented to downstream
         # forecasting as a healed value. An unknown station now gets None and the
         # imputer declines to invent a level for it (see below).
+        #
+        # Residual caveat: base_pressure_hpa is the station-LEVEL convention
+        # (785 hPa for the mountain profile). In the real-data replay path the same
+        # station streams NOAA sea-level pressure (~1013 hPa), so this baseline is
+        # in the wrong convention there too -- but the fallback only fires at cold
+        # start before ANY clean reading has established history. Once one valid
+        # reading exists (always true after benchmark warmup), imputation uses the
+        # recent stream value, which is already in the stream's own convention.
         st_prof = config.stations.get(station_id)
 
         # Temperature Imputation

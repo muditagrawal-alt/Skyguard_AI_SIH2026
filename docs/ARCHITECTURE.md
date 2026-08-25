@@ -53,9 +53,9 @@ The core mission of **SkyGuard AI** is to distinguish between genuine, severe me
                                                    │
                                                    ▼
 ┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
-│ Tier 5: Predictive Sensor Maintenance & Health Radar                                             │
-│ - Signal-to-Noise Ratio (SNR) and Fault Rate Monitoring                                          │
-│ - Sensor Health Score (0–100%) and Remaining Useful Life (RUL in Days)                           │
+│ Tier 5: Sensor Health & Maintenance Advisory (heuristic, rule-based)                             │
+│ - Rolling Hardware-Fault Rate & CUSUM Calibration-Drift Monitoring                               │
+│ - Sensor Health Index (0–100%) mapped to a coarse days-to-service band                           │
 │ - Automated Calibration & Maintenance Advisories                                                 │
 └──────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```

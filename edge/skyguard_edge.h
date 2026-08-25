@@ -149,8 +149,13 @@ static inline void skyguard_edge_process(
     result->dew_point_c = td;
     result->vpd_hpa = vpd;
 
-    // 2. Physical Range Boundary Check
-    if (t < -40.0f || t > 60.0f || p < 700.0f || p > 1100.0f || rh < 0.0f || rh > 102.0f) {
+    // 2. Physical Range Boundary Check -- kept in lock-step with the central WMO
+    // envelope in backend/app/core/config.py (temp -95..65 C, pressure 300..1085 hPa,
+    // humidity 0..100 %). These are the OUTER physical limits of any Earth surface
+    // station, not a typical operating range: the old -40..60 C / 700..1100 hPa gate
+    // silently rejected legitimate polar and high-altitude readings the corrected
+    // central config now accepts.
+    if (t < -95.0f || t > 65.0f || p < 300.0f || p > 1085.0f || rh < 0.0f || rh > 100.0f) {
         result->is_anomaly = true;
         result->anomaly_confidence = 1.0f;
         result->severity = EDGE_SEVERITY_CRITICAL;

@@ -188,7 +188,7 @@ class SkyGuardPipeline:
         vpd = physics_res.get("vpd_hpa") or 0.0
         dp_dep = physics_res.get("dew_point_depression_c") or 0.0
 
-        if not is_packet_loss and temp is not None:
+        if not is_packet_loss and temp is not None and pres is not None and hum is not None:
             if_res = multivariate_detector.score_observation(
                 temp_c=temp,
                 pressure_hpa=pres,
@@ -331,6 +331,22 @@ class SkyGuardPipeline:
             buffer.pop(0)
 
         return processed_packet
+
+
+def reset_detector_state():
+    """
+    Resets the module-level singleton detector state that constructing a fresh
+    SkyGuardPipeline() does NOT clear: the statistical engine's per-station
+    EWMA/CUSUM/flatline state, and the sensor health tracker's per-station history.
+    Benchmarks that evaluate independent scenarios/categories must call this between
+    runs so warmed-up state from one category cannot leak into the next and silently
+    change its scores. (A pipeline's own sliding buffers are per-instance and already
+    reset by constructing a new SkyGuardPipeline(); the isolation forest, autoencoder,
+    ensemble, and root-cause classifier hold no per-run mutable state after training,
+    so they need no reset.)
+    """
+    statistical_engine.reset()
+    sensor_health_tracker.reset()
 
 
 pipeline = SkyGuardPipeline()

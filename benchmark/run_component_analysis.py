@@ -29,7 +29,7 @@ from sklearn.metrics import precision_score, recall_score, f1_score, roc_auc_sco
 
 from backend.app.core.config import config
 from backend.app.core.data_generator import VirtualAWSNetworkSimulator, AnomalyInjectionRequest
-from backend.app.core.pipeline import SkyGuardPipeline
+from backend.app.core.pipeline import SkyGuardPipeline, reset_detector_state
 
 DEFAULT_SEED = 42
 THRESH = config.thresh_low  # 0.35 -- the same cutoff the ensemble itself uses for "is_anomaly"
@@ -97,6 +97,9 @@ def run_synthetic(seed: int):
     for tc in test_cases:
         sim = VirtualAWSNetworkSimulator()
         pipe = SkyGuardPipeline()
+        # Fresh pipeline resets only its own buffers; reset the shared singleton
+        # statistical/health state too so each test case is scored in isolation.
+        reset_detector_state()
         for _ in range(20):
             w = sim.generate_next_reading(station_id, dt_seconds=1.0)
             pipe.process_reading(w, dt_seconds=1.0)
@@ -109,9 +112,7 @@ def run_synthetic(seed: int):
             raw = sim.generate_next_reading(station_id, dt_seconds=1.0)
             res = pipe.process_reading(raw, dt_seconds=1.0)
             effective = raw.get("injected_anomalies_effective", [])
-            label = 1 if (tc["type"] is not None and tc["type"] in effective) else (
-                0 if tc["label"] == 0 else 0
-            )
+            label = 1 if (tc["type"] is not None and tc["type"] in effective) else 0
             y_true.append(label)
             for name, fn in COMPONENTS.items():
                 component_scores[name].append(fn(res))
@@ -156,6 +157,9 @@ def run_real_data(seed: int):
 
         sim = VirtualAWSNetworkSimulator()
         pipe = SkyGuardPipeline()
+        # Each real station is an independent evaluation; clear shared singleton
+        # detector state so one station's warmed-up baselines don't leak into the next.
+        reset_detector_state()
         prev_dt = None
         for r in rows[:30]:
             dt = max(60.0, (r["_dt"] - prev_dt).total_seconds()) if prev_dt else 3600.0

@@ -279,7 +279,7 @@ def run_real_data_benchmark(seed: int = DEFAULT_SEED):
     report_content = "\n".join(report_lines) + "\n"
 
     out_path = Path(__file__).resolve().parent / "real_data_evaluation_report.md"
-    with open(out_path, "w") as f:
+    with open(out_path, "w", encoding="utf-8") as f:
         f.write(report_content)
     print(f"\n✅ Real-data benchmark report generated at {out_path.relative_to(Path(__file__).resolve().parent.parent)}\n")
 

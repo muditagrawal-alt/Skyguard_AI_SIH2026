@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import numpy as np
 
 from backend.app.core.data_generator import VirtualAWSNetworkSimulator, AnomalyInjectionRequest
-from backend.app.core.pipeline import SkyGuardPipeline
+from backend.app.core.pipeline import SkyGuardPipeline, reset_detector_state
 
 SEED = 42
 STATIONS = ["AWS_ALPHA_MOUNTAIN", "AWS_BETA_COASTAL", "AWS_GAMMA_URBAN", "AWS_DELTA_DESERT"]
@@ -36,6 +36,12 @@ STORM_STEPS = 80
 def run_scenario(storm_stations):
     random.seed(SEED)
     np.random.seed(SEED)
+    # Both scenarios re-seed identically for reproducibility, but the statistical
+    # engine and health tracker are module-level singletons: without this reset,
+    # Scenario B would inherit all of Scenario A's warmed-up per-station CUSUM/EWMA
+    # and health state, so the two "independent" runs would not actually be
+    # comparable. Clear that shared state so each scenario starts cold.
+    reset_detector_state()
 
     sim = VirtualAWSNetworkSimulator()
     pipe = SkyGuardPipeline()

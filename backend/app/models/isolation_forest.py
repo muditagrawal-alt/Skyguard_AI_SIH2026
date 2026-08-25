@@ -56,8 +56,21 @@ class MultivariateOutlierDetector:
                 station_rows = training_rows(list(reader))
 
             prev_t, prev_p, prev_h = None, None, None
+            skipped = 0
             for r in station_rows:
-                t, pres, h = float(r["temperature_c"]), float(r["pressure_hpa"]), float(r["humidity_pct"])
+                # A single malformed row (non-numeric field, missing column, stray
+                # blank line) must NOT crash backend import: this loader runs at
+                # module load time while constructing the singleton detector, so an
+                # unguarded float() here would take down the whole API on startup
+                # over one bad line in a data file. Skip the bad row and continue;
+                # the model simply trains on the rows that parse cleanly.
+                try:
+                    t = float(r["temperature_c"])
+                    pres = float(r["pressure_hpa"])
+                    h = float(r["humidity_pct"])
+                except (KeyError, ValueError, TypeError):
+                    skipped += 1
+                    continue
                 d_t = abs(t - prev_t) if prev_t is not None else 0.0
                 d_p = abs(pres - prev_p) if prev_p is not None else 0.0
                 d_h = abs(h - prev_h) if prev_h is not None else 0.0
@@ -66,6 +79,8 @@ class MultivariateOutlierDetector:
                 dp_dep = max(0.0, t - td)
                 rows.append([t, pres, h, d_t, d_p, d_h, vpd, dp_dep])
                 prev_t, prev_p, prev_h = t, pres, h
+            if skipped:
+                print(f"[isolation_forest] {csv_path.name}: skipped {skipped} malformed row(s) during feature load")
 
         return np.array(rows, dtype=np.float64) if rows else None
 
@@ -127,6 +142,23 @@ class MultivariateOutlierDetector:
         Calculates multivariate anomaly score on a single observation.
         Returns outlier probability in range [0.0, 1.0].
         """
+        # Defense-in-depth against a partial/dropped packet. StandardScaler.transform
+        # on an array containing None raises (object-dtype TypeError on numpy<2, or
+        # "Input contains NaN" on numpy>=2), which previously surfaced as an HTTP 500
+        # on any batch containing a reading missing pressure or humidity. The pipeline
+        # already guards this path (see core/pipeline.py), but a direct caller must not
+        # be able to crash the detector: a reading we cannot fully feature-ize is
+        # treated as missing telemetry, mirroring the pipeline's packet-loss result.
+        if any(v is None for v in (
+            temp_c, pressure_hpa, humidity_pct,
+            d_temp, d_pres, d_hum, vpd, dew_point_depression
+        )):
+            return {
+                "isolation_score": -0.5,
+                "isolation_anomaly_prob": 0.95,
+                "is_multivariate_outlier": True
+            }
+
         features = np.array([[
             temp_c, pressure_hpa, humidity_pct,
             d_temp, d_pres, d_hum,

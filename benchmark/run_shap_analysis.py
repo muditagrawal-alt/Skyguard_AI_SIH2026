@@ -139,7 +139,7 @@ def main():
         lines.append(f"| {label} | " + " | ".join(f"{v:+.3f}" for v in row) + " |")
 
     out_path = Path(__file__).resolve().parent / "shap_analysis_report.md"
-    with open(out_path, "w") as f:
+    with open(out_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
 
     print(f"\n✅ SHAP report generated at {out_path.relative_to(Path(__file__).resolve().parent.parent)}\n")

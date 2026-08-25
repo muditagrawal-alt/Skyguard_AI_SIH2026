@@ -17,7 +17,7 @@ from sklearn.metrics import precision_score, recall_score, f1_score
 
 from backend.app.core.config import config
 from backend.app.core.data_generator import VirtualAWSNetworkSimulator, AnomalyInjectionRequest
-from backend.app.core.pipeline import SkyGuardPipeline
+from backend.app.core.pipeline import SkyGuardPipeline, reset_detector_state
 
 DEFAULT_SEED = 42
 
@@ -67,6 +67,13 @@ def run_comprehensive_benchmark(seed: int = DEFAULT_SEED):
         # Re-instantiate clean test environment for isolated metric evaluation
         test_sim = VirtualAWSNetworkSimulator()
         test_pipe = SkyGuardPipeline()
+        # A fresh pipeline only resets its own sliding buffers; the statistical engine
+        # and health tracker are module-level singletons whose per-station state would
+        # otherwise carry over from the previous category and corrupt this one's
+        # metrics (e.g. a CUSUM accumulator warmed up by the drift category leaking
+        # into the packet-loss category). Reset them so each category is evaluated
+        # from truly cold state.
+        reset_detector_state()
 
         # Warm up pipeline buffer with 20 baseline steps
         for _ in range(20):
@@ -194,13 +201,13 @@ def run_comprehensive_benchmark(seed: int = DEFAULT_SEED):
 
 ## 3. Key Findings
 
-1. **Thunderstorm False Alarm Rate**: {storm_far:.2f}% of steps during a genuine, gradually-intensifying convective storm were misclassified as a sensor fault ({'meets' if storm_far <= 2.0 else 'does NOT yet meet'} the < 2.0% target). Root cause: the CUSUM drift detector cannot distinguish "the sensor is drifting" from "the weather is genuinely trending" from a single station's own time series alone during the slow ramp-in of an event, before the root-cause classifier's genuine-weather gate ($RH > 78\\%$ or a confirmed cooling trend) is satisfied. See the cross-station spatial consistency check for the mitigation.
+1. **Thunderstorm False Alarm Rate**: {storm_far:.2f}% of steps during a genuine, gradually-intensifying convective storm were misclassified as a sensor fault ({'meets' if storm_far <= 2.0 else 'does NOT yet meet'} the < 2.0% target). Root cause: the CUSUM drift detector cannot distinguish "the sensor is drifting" from "the weather is genuinely trending" from a single station's own time series alone during the slow ramp-in of an event, before the root-cause classifier's genuine-weather gate is satisfied. That gate fires only when no hard thermodynamic bound is broken AND the recent trajectory shows the convective signature -- a temperature drop (> 0.5 °C) or a humidity rise (> 10%) over the last ~10 steps, or a coordinated cooling-and-moistening trend (temperature falling while humidity rises together, over a 6- or 30-step window) -- never on any absolute humidity level. See the cross-station spatial consistency check for the mitigation.
 2. **Sub-millisecond Real-Time Processing**: Pipeline latency of **{avg_latency:.2f} ms** satisfies high-throughput edge and central gateway streaming constraints.
 3. **Continuous Data Continuity**: Self-healing imputer delivers physically valid reconstructions with an average error of only **{mean_imputation_mae:.2f} °C**.
 4. **Reproducibility**: This run used a fixed random seed ({seed}); results are deterministic and will reproduce exactly on re-run rather than varying between executions.
 """
 
-    with open("benchmark/evaluation_report.md", "w") as f:
+    with open("benchmark/evaluation_report.md", "w", encoding="utf-8") as f:
         f.write(report_content)
 
     print("\n✅ Benchmark evaluation report generated at benchmark/evaluation_report.md\n")

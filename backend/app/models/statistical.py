@@ -30,10 +30,14 @@ class AdaptiveRollingBaseline:
         # Update running variance and mean
         diff = x - self.mean
         self.mean += self.alpha * diff
+        # Variance is floored at 0.25, so std_dev is always >= 0.5. That floor keeps
+        # the z-score numerically stable (no divide-by-near-zero) AND makes any
+        # explicit "std_dev < small" guard below redundant -- the floor already
+        # enforces it, so such a clause is unreachable dead code.
         self.var = max(0.25, (1.0 - self.alpha) * (self.var + self.alpha * (diff ** 2)))
         std_dev = math.sqrt(self.var)
 
-        if self.count < self.warmup_steps or std_dev < 0.2:
+        if self.count < self.warmup_steps:
             z_score = 0.0
         else:
             z_score = diff / std_dev
@@ -283,6 +287,21 @@ class StatisticalEngine:
             "stat_anomaly_score": round(stat_anomaly_score, 4),
             "drift_flags": drift_flags
         }
+
+
+    def reset(self):
+        """
+        Clears all per-station streaming state (EWMA baselines, flatline counters,
+        CUSUM accumulators). This engine is a module-level singleton, so its state
+        outlives any single SkyGuardPipeline() instance. Benchmarks construct a
+        fresh pipeline per scenario/category to isolate them, but without this call
+        a CUSUM accumulator or EWMA mean warmed up by one category leaks into the
+        next and silently changes its scores. Call between independent runs so each
+        one truly starts from cold state.
+        """
+        self.baselines.clear()
+        self.flatline.clear()
+        self.cusum.clear()
 
 
 statistical_engine = StatisticalEngine()

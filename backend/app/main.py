@@ -34,11 +34,16 @@ app = FastAPI(
     description="Real-Time Physics-Informed Anomaly Detection, Self-Healing, and Explainable AI for Weather Stations."
 )
 
-# Enable CORS for all origins (for Streamlit, Web clients, and IDE previews)
+# CORS for browser clients (Streamlit, web dashboards, IDE previews). This API is
+# stateless and token/cookie-free, so credentials are disabled: the wildcard origin
+# `allow_origins=["*"]` combined with `allow_credentials=True` is both a security
+# anti-pattern and rejected by browsers outright (the spec forbids a wildcard origin
+# on credentialed requests). If per-user auth is ever added, replace the wildcard
+# with an explicit origin allow-list and re-enable credentials together.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -65,7 +70,7 @@ def get_stations():
     Returns all configured Automatic Weather Stations and their geographical/climatic metadata.
     """
     return {
-        "stations": [p.dict() for p in config.stations.values()]
+        "stations": [p.model_dump() for p in config.stations.values()]
     }
 
 

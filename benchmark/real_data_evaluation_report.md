@@ -1,6 +1,6 @@
 # SkyGuard AI — Real Historical Data Benchmark Report
 
-**Evaluation Date**: 2026-08-24 00:23:41
+**Evaluation Date**: 2026-08-25 11:13:37
 **Random Seed**: 42
 **Data Source**: NOAA ISD-Lite (see data/real_stations/STATION_SOURCES.md)
 
@@ -14,7 +14,7 @@ Unlike `benchmark/run_benchmark.py` (fully synthetic diurnal generator), this ru
 | Detection Recall | 88.29% |
 | Overall F1-Score | 92.18% |
 | False Positive Rate on real, un-injected weather | 0.61% |
-| Average Inference Latency | 5.291 ms |
+| Average Inference Latency | 15.642 ms |
 
 ## Per-Station Results
 
