@@ -1,0 +1,134 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import 'tailwindcss';
+
+@theme {
+  --font-display: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  --color-stratus: #f6f8fb;
+  --color-frost: #fbfcfe;
+  --color-mist: #e6ebf2;
+  --color-ink: #0f1b2d;
+  --color-haze: #64748b;
+  --color-azimuth: #1d6fe0;
+
+  --color-status-normal: #15a66e;
+  --color-status-weather: #6366f1;
+  --color-status-warning: #f59e0b;
+  --color-status-critical: #e5484d;
+
+  --color-series-temp: #f97316;
+  --color-series-pressure: #06b6d4;
+  --color-series-humidity: #8b5cf6;
+  --color-series-dew: #ec4899;
+  --color-series-healed: #15a66e;
+  --color-series-truth: #94a3b8;
+
+  --radius-card: 16px;
+  --radius-control: 12px;
+
+  --shadow-card: 0 1px 2px rgba(15, 27, 45, 0.04), 0 8px 24px rgba(15, 27, 45, 0.06);
+  --shadow-lift: 0 2px 4px rgba(15, 27, 45, 0.06), 0 12px 32px rgba(15, 27, 45, 0.1);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background-color: var(--color-stratus);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+@keyframes pulse-live {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.35;
+    transform: scale(0.7);
+  }
+}
+
+.live-dot::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background: currentColor;
+  animation: pulse-live 1.8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-dot::after {
+    animation: none;
+  }
+}
+
+/* Map corroboration overlay ─ isolated fault halo + weather arc */
+@keyframes halo-pulse {
+  0% {
+    transform: translate(-50%, -50%) scale(0.7);
+    opacity: 0.85;
+  }
+  70% {
+    opacity: 0.1;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(1.3);
+    opacity: 0;
+  }
+}
+.iso-halo {
+  animation: halo-pulse 2.2s ease-out infinite;
+}
+@keyframes iso-spin {
+  to {
+    transform: translate(-50%, -50%) rotate(360deg);
+  }
+}
+.iso-ring {
+  animation: iso-spin 9s linear infinite;
+}
+@keyframes arc-march {
+  to {
+    stroke-dashoffset: -16;
+  }
+}
+.arc-flow {
+  animation: arc-march 1.3s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .iso-halo,
+  .iso-ring,
+  .arc-flow {
+    animation: none;
+  }
+}
+
+/* Hide scrollbars until scrolling */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+*:hover {
+  scrollbar-color: #cbd5e1 transparent;
+}
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 9999px;
+}
+:hover::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+}

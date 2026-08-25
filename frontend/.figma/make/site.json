@@ -1,0 +1,10 @@
+{
+  "description": "Create and customize user interfaces effortlessly with intuitive design tools that streamline development for designers and developers alike.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
