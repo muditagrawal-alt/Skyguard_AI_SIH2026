@@ -8,7 +8,7 @@ client = TestClient(app)
 def test_get_root():
     response = client.get("/")
     assert response.status_code == 200
-    assert response.json()["status"] == "online"
+    assert response.json()["status"] == "ONLINE"
 
 
 def test_get_stations():
@@ -35,7 +35,7 @@ def test_clear_buffer():
     # Verify buffer is empty
     buffer_resp = client.get("/api/station_buffer/AWS_ALPHA_MOUNTAIN")
     assert buffer_resp.status_code == 200
-    assert len(buffer_resp.json()["buffer"]) == 0
+    assert len(buffer_resp.json()["history"]) == 0
 
 
 def test_clear_buffer_invalid_station():
@@ -54,7 +54,6 @@ def test_llm_health_endpoint():
 def test_llm_complete_unconfigured(monkeypatch):
     # Ensure GROQ_API_KEY is not configured
     monkeypatch.setenv("GROQ_API_KEY", "")
-    # Reset lru cache for env file parsing if needed
     from backend.app.core import llm
     llm._env_file_values.cache_clear()
 

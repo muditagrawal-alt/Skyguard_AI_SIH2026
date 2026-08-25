@@ -48,7 +48,7 @@ def _env_file_values() -> Dict[str, str]:
 def _get(name: str, default: str = "") -> str:
     """Environment variable, falling back to the .env file, then the default."""
     val = os.environ.get(name)
-    if val:
+    if val is not None:
         return val
     return _env_file_values().get(name, default)
 
