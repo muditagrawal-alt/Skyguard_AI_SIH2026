@@ -1,14 +1,12 @@
-import { ChevronDown, Globe, Search, Bell, HelpCircle } from "lucide-react";
+import { ChevronDown, Globe, Bell } from "lucide-react";
+import { Link } from "react-router";
 import { useStream } from "../lib/StreamProvider";
 
 export default function TopBar({ title }: { title: string }) {
-  const { backendOnline, connected, dataSource, latestByStation } = useStream();
+  const { backendOnline, connected, dataSource, latestByStation, stations, selectedStationId, setStation } =
+    useStream();
 
-  const sourceLabel = !backendOnline
-    ? "Demo data"
-    : dataSource === "real"
-      ? "Real NOAA"
-      : "Synthetic";
+  const sourceLabel = !backendOnline ? "Demo data" : dataSource === "real" ? "Real NOAA" : "Synthetic";
   const sourceOnline = backendOnline && connected;
 
   // Live "notification" count = stations whose latest reading is an active
@@ -22,9 +20,26 @@ export default function TopBar({ title }: { title: string }) {
       <h1 className="font-display text-[22px] font-semibold text-ink">{title}</h1>
 
       <div className="flex items-center gap-2">
-        <button className="hidden items-center gap-1.5 rounded-xl border border-mist bg-white px-3 py-1.5 text-sm font-medium text-ink transition-colors hover:border-azimuth/40 md:flex">
-          All stations <ChevronDown size={15} className="text-haze" />
-        </button>
+        {/* Global station picker — stays in sync with the Live Monitor controls */}
+        <div className="relative hidden md:block">
+          <select
+            aria-label="Active station"
+            value={selectedStationId}
+            onChange={(e) => setStation(e.target.value)}
+            className="appearance-none rounded-xl border border-mist bg-white py-1.5 pl-3 pr-9 text-sm font-medium text-ink transition-colors hover:border-azimuth/40 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-azimuth"
+          >
+            {stations.map((s) => (
+              <option key={s.station_id} value={s.station_id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+          <ChevronDown
+            size={15}
+            className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-haze"
+          />
+        </div>
+
         <span
           className="hidden items-center gap-1.5 rounded-xl bg-stratus px-3 py-1.5 text-xs font-medium text-haze lg:flex"
           title={sourceOnline ? "Backend connected" : "Backend offline — showing demo data"}
@@ -36,26 +51,22 @@ export default function TopBar({ title }: { title: string }) {
           />
           {sourceLabel}
         </span>
-        <button className="hidden items-center gap-1.5 rounded-xl border border-mist bg-white px-3 py-1.5 text-sm font-medium text-ink transition-colors hover:border-azimuth/40 sm:flex">
-          Last 24h <ChevronDown size={15} className="text-haze" />
-        </button>
 
         <div className="mx-1 hidden h-6 w-px bg-mist sm:block" />
 
-        <button className="flex h-9 w-9 items-center justify-center rounded-xl text-haze transition-colors hover:bg-mist/50 hover:text-ink">
-          <Search size={17} strokeWidth={1.5} />
-        </button>
-        <button className="relative flex h-9 w-9 items-center justify-center rounded-xl text-haze transition-colors hover:bg-mist/50 hover:text-ink">
+        <Link
+          to="/anomalies"
+          aria-label={activeFaults > 0 ? `${activeFaults} active faults — view anomalies` : "View anomalies"}
+          title="View anomalies"
+          className="relative flex h-9 w-9 items-center justify-center rounded-xl text-haze transition-colors hover:bg-mist/50 hover:text-ink"
+        >
           <Bell size={17} strokeWidth={1.5} />
           {activeFaults > 0 && (
             <span className="absolute right-1.5 top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--color-status-critical)] px-1 text-[10px] font-semibold text-white">
               {activeFaults}
             </span>
           )}
-        </button>
-        <button className="flex h-9 w-9 items-center justify-center rounded-xl text-haze transition-colors hover:bg-mist/50 hover:text-ink">
-          <HelpCircle size={17} strokeWidth={1.5} />
-        </button>
+        </Link>
       </div>
     </header>
   );

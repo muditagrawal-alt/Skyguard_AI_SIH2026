@@ -1,4 +1,4 @@
-import { Card } from "./primitives";
+import { Card, Skeleton } from "./primitives";
 import { healthMeters as mockHealthMeters } from "./data";
 import { useStream } from "../lib/StreamProvider";
 import { healthGauge, rulText, toHealthMeters } from "../lib/adapters";
@@ -24,7 +24,7 @@ function Gauge({ value }: { value: number }) {
         strokeWidth={12}
         strokeLinecap="round"
       />
-      <text x={cx} y={90} textAnchor="middle" className="font-display" fontSize={30} fontWeight={600} fill="var(--color-ink)">
+      <text x={cx} y={90} textAnchor="middle" className="font-display" fontSize={30} fontWeight={600} fill="var(--color-ink)" style={{ fontVariantNumeric: "tabular-nums" }}>
         {value}
       </text>
       <text x={cx} y={108} textAnchor="middle" fontSize={11} fontFamily="var(--font-mono)" fill="var(--color-haze)">
@@ -37,6 +37,7 @@ function Gauge({ value }: { value: number }) {
 export default function HealthRadar() {
   const { backendOnline, selectedLatest } = useStream();
   const live = backendOnline && selectedLatest;
+  const connecting = backendOnline && !selectedLatest;
 
   const gauge = live ? healthGauge(selectedLatest) : 92;
   const rul = live ? rulText(selectedLatest) : "318 days";
@@ -49,14 +50,29 @@ export default function HealthRadar() {
     <Card status="normal" className="flex h-full flex-col p-6">
       <h2 className="font-display text-[18px] font-semibold leading-6 text-ink">Sensor health radar</h2>
       <div className="mt-4 flex justify-center">
-        <Gauge value={gauge} />
+        {connecting ? (
+          <Skeleton className="h-[116px] w-[220px] max-w-full rounded-xl" />
+        ) : (
+          <Gauge value={gauge} />
+        )}
       </div>
       <div className="mt-3 text-center">
         <div className="text-sm text-ink">
           Estimated remaining useful life:{" "}
-          <span className="font-display font-semibold">{rul}</span>
+          {connecting ? (
+            <Skeleton className="inline-block h-4 w-16 align-middle" />
+          ) : (
+            <span className="font-display font-semibold">{rul}</span>
+          )}
         </div>
-        <p className="mt-1.5 text-xs leading-relaxed text-haze">{advisory}</p>
+        {connecting ? (
+          <div className="mx-auto mt-2 flex max-w-[240px] flex-col items-center gap-1.5">
+            <Skeleton className="h-2.5 w-full" />
+            <Skeleton className="h-2.5 w-2/3" />
+          </div>
+        ) : (
+          <p className="mt-1.5 text-xs leading-relaxed text-haze">{advisory}</p>
+        )}
       </div>
       <div className="mt-5 space-y-3.5">
         {meters.map((m) => {
@@ -70,10 +86,16 @@ export default function HealthRadar() {
             <div key={m.label}>
               <div className="mb-1 flex items-center justify-between text-xs">
                 <span className="text-ink">{m.label}</span>
-                <span className="font-mono text-haze">{m.value}%</span>
+                {connecting ? (
+                  <Skeleton className="inline-block h-3 w-9 align-middle" />
+                ) : (
+                  <span className="font-mono text-haze">{m.value}%</span>
+                )}
               </div>
               <div className="h-1.5 w-full overflow-hidden rounded-full bg-mist">
-                <div className="h-full rounded-full" style={{ width: `${m.value}%`, background: barColor }} />
+                {!connecting && (
+                  <div className="h-full rounded-full" style={{ width: `${m.value}%`, background: barColor }} />
+                )}
               </div>
             </div>
           );

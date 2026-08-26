@@ -99,3 +99,69 @@ where $Z_n = \frac{x_n - \mu_{\text{EWMA}}}{\sigma_{\text{EWMA}}}$, $k = 0.6$ (s
 | `CALIBRATION_DRIFT` | CUSUM accumulation $> 3.5$ over time | Sensor aging, salt crusting, radiation shield dirt |
 | `PHYSICAL_INCONSISTENCY` | $T < T_d - 0.5^\circ\text{C}$ or implied $T_d > 36^\circ\text{C}$ (exceeds Earth's ~35°C record dew point) | Transducer failure, corrupted calibration curves |
 | `COMMUNICATION_DROPOUT`| Missing/null telemetry frames or random noise | Telemetry packet loss, weak cellular/LoRa signal |
+
+---
+
+## 5. Presentation Layer — Operator Interfaces
+
+SkyGuard ships two front-ends over the same processing core. Neither re-implements any detection
+logic; both consume the processed packet emitted by `pipeline.process_reading()`.
+
+- **React Operator Dashboard (`frontend/`)** — the flagship, production-style console. React 19 +
+  Vite + TypeScript, styled with Tailwind v4 design tokens. Streams live telemetry over the
+  backend WebSocket and leads every event with the platform's core question: *sensor fault or
+  genuine weather?*
+- **Streamlit Control Center (`app.py`)** — a standalone testing/demo sandbox with 1-click anomaly
+  injection and a Real-NOAA / synthetic toggle, useful for driving the detector during development.
+
+### 5.1 Dashboard data flow
+
+```
+  WS /ws/telemetry  ─▶  StreamProvider          ─▶  pure adapters         ─▶  dumb components
+  (processed_packet     (single live-state           (adapters.ts:              (verdict.tsx et al:
+   JSON per reading)     source; rolling per-          ProcessedPacket            take plain props,
+                         station buffers; REST         → UI-ready shapes)         render only)
+                         backfill on mount)
+```
+
+Three concerns are kept strictly separated:
+
+1. **One live-state source.** `StreamProvider` owns the WebSocket connection(s), the rolling
+   per-station buffers, and the online/offline flag. Every component reads a single `useStream()`
+   hook rather than opening its own socket.
+2. **Pure adapters.** `src/lib/adapters.ts` transforms a raw `ProcessedPacket` into the exact shape
+   each component needs (verdict, root-cause readout, neighbour strip, decision pipeline, heal
+   provenance). Each transform has a *live* builder (from a packet) and an *offline* builder (from a
+   mock row); the page chooses which to call. The transforms are side-effect-free.
+3. **Dumb components.** The verdict / neighbour / pipeline / heal components take plain data props
+   and render — they never fetch, so the same component renders identically whether its data came
+   from a live packet or the offline fallback.
+
+### 5.2 What the operator sees per event
+
+Every anomaly is presented as a *decision*, not a raw score:
+
+- **Verdict** — SENSOR FAULT / GENUINE WEATHER / NORMAL, with a one-line reason and a three-test
+  evidence grid (Physics / Spatial / Rate).
+- **Root-cause readout** — the classifier's `fault_type` (humanized) and its engineering
+  `fault_category` from §4, shown with the **classifier's own confidence** for that fault class.
+  This value is deliberately *distinct* from the ensemble detection confidence (Tier 2): the ensemble
+  answers *"how sure are we this is anomalous?"*, the classifier answers *"how sure are we it is
+  **this specific** fault?"*. Both are shown side by side so neither is mistaken for the other.
+- **Neighbour-consistency strip** — the subject station against its network peers, making spatial
+  corroboration (weather) vs. isolation (fault) legible at a glance.
+- **Self-healing provenance** — raw → imputed value, with the original quarantined, not discarded.
+- **Network map** — an isolated-fault halo vs. a coordinated-weather arc over the station mesh.
+
+### 5.3 Honest-confidence display
+
+Detection confidence is rendered with a **± agreement band** — computed on the client as the spread
+across the four ensemble component scores (tight when they concur, wider when, e.g., physics fires
+but the others stay low) — and is **capped just below 100%**. This is a *presentation-layer* choice
+only: the ensemble mathematics in `models/ensemble.py` are untouched. The rationale is calibration
+honesty — a detector that renders a literal "100.0% confident" invites misplaced trust that no
+finite-evidence statistical detector has earned. First load shows skeleton placeholders rather than
+flashing zeros, and when the backend is unreachable the dashboard falls back to built-in demo data
+behind a clearly labelled **"Demo mode"** badge rather than presenting fabricated numbers as live.
+Network-level tiles (e.g. fleet health) are **aggregated on the client** from the live per-station
+packets already held in the StreamProvider buffers, not fetched as a separate server-computed metric.

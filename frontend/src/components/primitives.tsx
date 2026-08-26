@@ -16,17 +16,19 @@ export function Card({
   className = "",
   children,
   selected = false,
+  hover = false,
 }: {
   status?: Status;
   className?: string;
   children: ReactNode;
   selected?: boolean;
+  hover?: boolean;
 }) {
   return (
     <div
       className={`relative overflow-hidden rounded-2xl border border-mist bg-white shadow-card ${
-        selected ? "ring-2 ring-azimuth ring-offset-1 ring-offset-stratus" : ""
-      } ${className}`}
+        hover ? "transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lift" : ""
+      } ${selected ? "ring-2 ring-azimuth ring-offset-1 ring-offset-stratus" : ""} ${className}`}
     >
       <StatusSpine status={status} />
       {children}
@@ -72,6 +74,13 @@ export function LiveDot() {
   );
 }
 
+// Shimmering placeholder shown while the backend is connected but the first
+// packet/buffer hasn't arrived yet — so we never flash static mock numbers as
+// if they were live readings. Falls back to a flat block under reduced-motion.
+export function Skeleton({ className = "" }: { className?: string }) {
+  return <span aria-hidden className={`skeleton block rounded-md ${className}`} />;
+}
+
 export function KpiCard({
   label,
   value,
@@ -85,13 +94,21 @@ export function KpiCard({
   delta?: string;
   icon?: ReactNode;
 }) {
+  const tint = status === "idle" ? "var(--color-haze)" : statusColor[status];
   return (
     <Card status={status} className="p-4">
       <div className="flex items-center justify-between">
         <span className="text-xs font-medium text-haze">{label}</span>
-        {icon}
+        {icon ? (
+          <span
+            className="flex h-7 w-7 items-center justify-center rounded-lg"
+            style={{ color: tint, background: `color-mix(in srgb, ${tint} 12%, white)` }}
+          >
+            {icon}
+          </span>
+        ) : null}
       </div>
-      <div className="mt-2 font-display text-[28px] font-semibold leading-none text-ink">{value}</div>
+      <div className="tnum mt-2 font-display text-[28px] font-semibold leading-none text-ink">{value}</div>
       {delta ? <div className="mt-2 text-xs text-haze">{delta}</div> : null}
     </Card>
   );

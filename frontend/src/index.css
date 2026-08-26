@@ -45,6 +45,50 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Steady live readouts: fixed-width figures so streaming numbers don't reflow
+   character-by-character as they tick — the single biggest "polish" tell on a
+   real-time dashboard. Mono is data/time by definition; .tnum opts in the
+   large display-font numbers (KPIs, gauges, stat values). */
+.font-mono {
+  font-variant-numeric: tabular-nums;
+}
+.tnum {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+
+/* Keyboard focus — visible, on-brand ring for anything interactive that doesn't
+   already define its own. (Accessibility floor: never rely on hover alone.) */
+a:focus-visible,
+button:focus-visible,
+select:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--color-azimuth);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* Content entrance — a single, quiet rise as a view mounts. Gated for
+   reduced-motion. Used to stagger dashboard sections in, not decorate. */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.rise-in {
+  animation: rise-in 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .rise-in {
+    animation: none;
+  }
+}
+
 @keyframes pulse-live {
   0%,
   100% {
@@ -68,6 +112,32 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .live-dot::after {
+    animation: none;
+  }
+}
+
+/* Skeleton shimmer — first-load / "connecting to backend" placeholders */
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+.skeleton {
+  background-color: var(--color-mist);
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in srgb, white 55%, var(--color-mist)) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.5s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
     animation: none;
   }
 }

@@ -7,7 +7,7 @@ import {
   CartesianGrid,
   ResponsiveContainer,
 } from "recharts";
-import { Card } from "./primitives";
+import { Card, Skeleton } from "./primitives";
 import { telemetry as mockTelemetry } from "./data";
 import { useStream } from "../lib/StreamProvider";
 import { toTelemetryRows } from "../lib/adapters";
@@ -22,19 +22,32 @@ const legend = [
   { label: "Dew point", color: "var(--color-series-dew)", dash: true },
 ];
 
-function ChartFrame({ title, children }: { title: string; children: React.ReactNode }) {
+function ChartFrame({
+  title,
+  loading = false,
+  children,
+}: {
+  title: string;
+  loading?: boolean;
+  children: React.ReactNode;
+}) {
   return (
     <div>
       <div className="mb-1 font-mono text-[11px] font-medium text-haze">{title}</div>
-      <ResponsiveContainer width="100%" height={130}>
-        {children as React.ReactElement}
-      </ResponsiveContainer>
+      {loading ? (
+        <Skeleton className="h-[130px] w-full rounded-lg" />
+      ) : (
+        <ResponsiveContainer width="100%" height={130}>
+          {children as React.ReactElement}
+        </ResponsiveContainer>
+      )}
     </div>
   );
 }
 
 export default function TelemetryCharts() {
   const { backendOnline, selectedBuffer } = useStream();
+  const connecting = backendOnline && selectedBuffer.length === 0; // connected, buffer backfilling
   const rows = backendOnline && selectedBuffer.length > 0 ? toTelemetryRows(selectedBuffer) : mockTelemetry;
   const telemetry = rows;
 
@@ -61,7 +74,7 @@ export default function TelemetryCharts() {
       </div>
 
       <div className="mt-4 space-y-4">
-        <ChartFrame title="Temperature (°C)">
+        <ChartFrame title="Temperature (°C)" loading={connecting}>
           <ComposedChart data={telemetry} margin={{ top: 6, right: 8, bottom: 0, left: -18 }}>
             <CartesianGrid stroke="#eef2f7" vertical={false} />
             <XAxis dataKey="t" tick={axisStyle} tickLine={false} axisLine={{ stroke: "#e6ebf2" }} interval={3} />
@@ -73,7 +86,7 @@ export default function TelemetryCharts() {
           </ComposedChart>
         </ChartFrame>
 
-        <ChartFrame title="Atmospheric pressure (hPa)">
+        <ChartFrame title="Atmospheric pressure (hPa)" loading={connecting}>
           <ComposedChart data={telemetry} margin={{ top: 6, right: 8, bottom: 0, left: -18 }}>
             <CartesianGrid stroke="#eef2f7" vertical={false} />
             <XAxis dataKey="t" tick={axisStyle} tickLine={false} axisLine={{ stroke: "#e6ebf2" }} interval={3} />
@@ -83,7 +96,7 @@ export default function TelemetryCharts() {
           </ComposedChart>
         </ChartFrame>
 
-        <ChartFrame title="Relative humidity (%)">
+        <ChartFrame title="Relative humidity (%)" loading={connecting}>
           <ComposedChart data={telemetry} margin={{ top: 6, right: 8, bottom: 0, left: -18 }}>
             <CartesianGrid stroke="#eef2f7" vertical={false} />
             <XAxis dataKey="t" tick={axisStyle} tickLine={false} axisLine={{ stroke: "#e6ebf2" }} interval={3} />

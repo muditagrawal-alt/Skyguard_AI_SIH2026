@@ -3,6 +3,7 @@
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688.svg)](https://fastapi.tiangolo.com/)
 [![Streamlit](https://img.shields.io/badge/Testing%20UI-Streamlit-FF4B4B.svg)](https://streamlit.io/)
+[![React Dashboard](https://img.shields.io/badge/Operator%20Dashboard-React%20%7C%20Vite%20%7C%20TypeScript-61DAFB.svg)](frontend/RUN.md)
 [![PyTorch](https://img.shields.io/badge/AI%2FML-PyTorch%20%7C%20Scikit--Learn-EE4C2C.svg)](https://pytorch.org/)
 [![Edge AI](https://img.shields.io/badge/Edge%20AI-ESP32%20%7C%20MicroPython-green.svg)](docs/ESP32_DEPLOYMENT.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -27,7 +28,8 @@
 6. **Real-Time Self-Healing Imputation**: Reconstructs corrupted or missing readings dynamically so downstream forecasting pipelines experience zero data downtime.
 7. **Sensor Health & Maintenance Advisory**: Tracks each station's rolling hardware-fault rate and CUSUM calibration-drift scores to derive a live Sensor Health Index (0–100%), mapped to a coarse maintenance advisory band with a representative days-until-service figure. This is a heuristic, rule-based health tracker describing *present* condition — not a trained prognostic model, and the days figure is an advisory band, not an extrapolated failure forecast.
 8. **Ultra-Lightweight Edge AI (`skyguard_edge.h` & `skyguard_edge.py`)**: Zero-dynamic-memory C++ header ready for direct deployment on **ESP32**, **ARM Cortex-M**, and **MicroPython** (< 3.2 KB RAM, < 0.05 ms latency).
-9. **Interactive Control Center UI**: Built with Streamlit & Plotly, featuring a dynamic **Anomaly Injection Sandbox** (1-click triggers for Spikes, Flatlines, Drift, Physics Faults, Packet Loss, and Thunderstorms), a **Real NOAA / Synthetic Generator toggle** (real data as the live background signal by default, with the same injection sandbox layered on top), and a **Network Overview** showing all 4 stations concurrently — the direct visual answer to the problem statement's own example ("...while neighboring stations show normal conditions").
+9. **Real-Time Operator Dashboard (React + Vite + TypeScript, `frontend/`)**: A production-style operator console that consumes the backend's live WebSocket telemetry and leads every anomaly with the platform's core question — *sensor fault or genuine weather?* Each event surfaces an explicit **verdict** (SENSOR FAULT / GENUINE WEATHER / NORMAL), an explicit **root-cause classification** readout (humanized fault type, its engineering category, and the classifier's *own* confidence — surfaced straight from [`xai/root_cause.py`](backend/app/xai/root_cause.py) and kept distinct from the ensemble score), a six-stage **decision pipeline**, a **neighbour-consistency strip** for spatial corroboration, and **self-healing provenance** (raw → imputed, with the original value quarantined, not deleted). A live **network map** overlays an isolated-fault halo against a coordinated-weather arc. Confidence is displayed **honestly** — shown with a ± agreement band and capped just under 100%, because a calibrated detector never earns absolute certainty — and first load shows skeleton states rather than flashing placeholder numbers. Falls back to built-in demo data ("Demo mode") when the backend is offline. See [`frontend/RUN.md`](frontend/RUN.md).
+10. **Anomaly-Injection Control Center (Streamlit + Plotly)**: A standalone testing/demo sandbox built with Streamlit & Plotly, featuring a dynamic **Anomaly Injection Sandbox** (1-click triggers for Spikes, Flatlines, Drift, Physics Faults, Packet Loss, and Thunderstorms), a **Real NOAA / Synthetic Generator toggle** (real data as the live background signal by default, with the same injection sandbox layered on top), and a **Network Overview** showing all 4 stations concurrently — the direct visual answer to the problem statement's own example ("...while neighboring stations show normal conditions").
 
 ---
 
@@ -78,9 +80,21 @@ SkyGuard_AI/
 │       └── processed/               # Clean per-station CSVs (committed, ~46k real observations)
 ├── docs/
 │   ├── ARCHITECTURE.md              # Mathematical formulations & system design
+│   ├── PIPELINE_AND_METRICS.md      # End-to-end pipeline stages & how each metric is measured
 │   ├── USE_CASES.md                 # Real-world operational scenarios
 │   └── ESP32_DEPLOYMENT.md          # Guide for flashing onto microcontrollers
-├── app.py                           # Interactive Streamlit Testing & Control Center UI
+├── frontend/                        # Real-time React operator dashboard (Vite + TypeScript)
+│   ├── src/
+│   │   ├── lib/
+│   │   │   ├── StreamProvider.tsx   # Single live-state source (WebSocket + rolling buffers)
+│   │   │   ├── adapters.ts          # Pure ProcessedPacket → UI transforms (verdict, root-cause, neighbours, healing)
+│   │   │   └── types.ts             # Wire types mirroring the backend processed packet
+│   │   ├── components/              # Dumb verdict / neighbour / pipeline / heal components + primitives
+│   │   ├── pages/                   # Overview, Live Monitor, Anomalies, Map, Stations, Maintenance, Analytics, Settings
+│   │   └── layout/                  # App shell (NavRail, TopBar)
+│   ├── package.json                 # React 19, Vite, react-router, recharts, lucide
+│   └── RUN.md                       # Frontend run & backend-wiring guide
+├── app.py                           # Standalone Streamlit anomaly-injection control center (testing/demo)
 ├── run_demo.py                      # 1-Click Master Launcher Script
 ├── requirements.txt                 # Python dependencies
 └── README.md                        # Master Documentation
@@ -99,20 +113,32 @@ cd Skyguard_AI_SIH2026
 pip install -r requirements.txt
 ```
 
-### 2. Launch the Interactive Control Center UI (1-Click Demo)
+### 2. Launch the Real-Time Operator Dashboard (React) — the flagship demo UI
+
+The React dashboard consumes live telemetry from the FastAPI backend, so start the backend first, then the frontend.
+
+**2a. Start the backend (REST + WebSocket server):**
+```bash
+uvicorn backend.app.main:app --reload --port 8000
+```
+- Interactive API docs (Swagger UI): `http://127.0.0.1:8000/docs`
+- Live WebSocket endpoint: `ws://127.0.0.1:8000/ws/telemetry?station_id=AWS_ALPHA_MOUNTAIN&source=synthetic&rate_hz=1` (use `source=real` to replay real NOAA history instead of the synthetic generator)
+
+**2b. Start the frontend** (requires Node 20+ and [pnpm](https://pnpm.io)):
+```bash
+cd frontend
+pnpm install
+pnpm dev
+```
+Open **`http://localhost:8443`**. The dev server proxies `/api` and `/ws` to the backend on port 8000, so no extra CORS setup is needed. Override the backend target with `BACKEND_ORIGIN` (e.g. `BACKEND_ORIGIN=http://127.0.0.1:9000 pnpm dev`) or change the frontend port with `PORT`. If the backend is offline, the dashboard falls back to built-in demo data and shows a **"Demo mode"** badge rather than fabricating a live feed. See [`frontend/RUN.md`](frontend/RUN.md) for full details.
+
+### 3. Alternative — Streamlit Anomaly-Injection Control Center (standalone)
 ```bash
 python run_demo.py
 # or
 streamlit run app.py
 ```
-Open **`http://localhost:8501`** in your browser to interact with live streaming telemetry, trigger anomalies in the sandbox, view XAI diagnostic reports, and observe the self-healing green imputed curves in real-time!
-
-### 3. Launch the FastAPI Backend (REST & WebSocket Server)
-```bash
-uvicorn backend.app.main:app --reload --port 8000
-```
-- Interactive API Docs (Swagger UI): `http://127.0.0.1:8000/docs`
-- Real-time WebSocket Endpoint: `ws://127.0.0.1:8000/ws/telemetry?station_id=AWS_ALPHA_MOUNTAIN`
+Open **`http://localhost:8501`** for the standalone testing sandbox: trigger anomalies with 1-click, toggle Real NOAA / Synthetic data, read XAI diagnostic reports, and watch the self-healing green imputed curves in real time. This UI runs the detection pipeline in-process and does **not** require the FastAPI backend from step 2a.
 
 ---
 
@@ -251,6 +277,9 @@ void loop() {
 
 ## 📚 Documentation Links
 - [System Architecture & Mathematics](docs/ARCHITECTURE.md)
+- [Pipeline Stages & How Each Metric Is Measured](docs/PIPELINE_AND_METRICS.md)
 - [Operational Use Cases & Scenarios](docs/USE_CASES.md)
 - [ESP32 & Microcontroller Flashing Guide](docs/ESP32_DEPLOYMENT.md)
+- [React Operator Dashboard — Run & Wiring Guide](frontend/RUN.md)
+- [SIH 2026 Demo Script & Talking Points](docs/DEMO_SCRIPT.md)
 - [Benchmark Evaluation Report](benchmark/evaluation_report.md)

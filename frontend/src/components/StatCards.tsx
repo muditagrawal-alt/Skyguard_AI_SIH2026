@@ -1,5 +1,5 @@
 import { Thermometer, Gauge, Droplets, Wind, Activity, ShieldCheck } from "lucide-react";
-import { Card, StatusPill } from "./primitives";
+import { Card, StatusPill, Skeleton } from "./primitives";
 import { metrics as mockMetrics } from "./data";
 import type { Status } from "./data";
 import { useStream } from "../lib/StreamProvider";
@@ -41,6 +41,7 @@ export default function StatCards() {
   const { backendOnline, selectedLatest, selectedBuffer } = useStream();
 
   const live = backendOnline && selectedLatest;
+  const connecting = backendOnline && !selectedLatest; // connected, first packet pending
   const metrics = live ? toMetrics(selectedLatest, selectedBuffer) : mockMetrics;
 
   const anomalyStatus: Status = live ? packetStatus(selectedLatest) : "normal";
@@ -51,28 +52,42 @@ export default function StatCards() {
       {metrics.map((m) => {
         const Icon = icons[m.key];
         return (
-          <Card key={m.key} status={m.status} className="p-4">
+          <Card key={m.key} status={connecting ? "idle" : m.status} className="p-4">
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium text-haze">{m.label}</span>
               {Icon ? <Icon size={15} strokeWidth={1.5} style={{ color: m.color }} /> : null}
             </div>
             <div className="mt-2 flex items-baseline gap-1">
-              <span className="font-display text-[26px] font-semibold leading-none text-ink">{m.value}</span>
-              <span className="text-xs text-haze">{m.unit}</span>
+              {connecting ? (
+                <Skeleton className="h-6 w-16" />
+              ) : (
+                <>
+                  <span className="tnum font-display text-[26px] font-semibold leading-none text-ink">{m.value}</span>
+                  <span className="text-xs text-haze">{m.unit}</span>
+                </>
+              )}
             </div>
             <div className="mt-2">
-              <Sparkline points={m.spark} color={m.color} />
+              {connecting ? (
+                <Skeleton className="h-[22px] w-[72px]" />
+              ) : (
+                <Sparkline points={m.spark} color={m.color} />
+              )}
             </div>
           </Card>
         );
       })}
-      <Card status={anomalyStatus === "idle" ? "normal" : anomalyStatus} className="flex flex-col p-4">
+      <Card status={connecting ? "idle" : anomalyStatus === "idle" ? "normal" : anomalyStatus} className="flex flex-col p-4">
         <div className="flex items-center justify-between">
           <span className="text-xs font-medium text-haze">Anomaly state</span>
           <ShieldCheck size={15} strokeWidth={1.5} className="text-[var(--color-status-normal)]" />
         </div>
         <div className="mt-auto pt-4">
-          <StatusPill status={anomalyStatus}>{anomalyLabel}</StatusPill>
+          {connecting ? (
+            <Skeleton className="h-6 w-28 rounded-full" />
+          ) : (
+            <StatusPill status={anomalyStatus}>{anomalyLabel}</StatusPill>
+          )}
         </div>
       </Card>
     </div>

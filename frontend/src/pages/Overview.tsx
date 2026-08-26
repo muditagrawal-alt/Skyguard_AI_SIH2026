@@ -20,7 +20,7 @@ import {
   packetStatus,
   packetLabel,
   toOverviewKpis,
-  toNetworkHealth,
+  toNetworkHealthAgg,
   toLiveAlerts,
   toDetectionsByType,
   toFaultWeatherBand,
@@ -32,7 +32,7 @@ const axisStyle = { fontSize: 10, fontFamily: "var(--font-mono)", fill: "#94a3b8
 type NetCard = { id: string; type: string; name: string; temp: string; status: Status; label: string };
 
 export default function Overview() {
-  const { backendOnline, stations, latestByStation, buffers, selectedBuffer, dataSource } = useStream();
+  const { backendOnline, stations, latestByStation, buffers, dataSource } = useStream();
   const live = backendOnline;
   const sourceLabel = dataSource === "real" ? "Real NOAA" : "Synthetic";
 
@@ -59,7 +59,7 @@ export default function Overview() {
         label: s.label,
       }));
 
-  const health = live && selectedBuffer.length > 0 ? toNetworkHealth(selectedBuffer) : mockHealth;
+  const health = live ? toNetworkHealthAgg(buffers) : mockHealth;
   const detections = live ? toDetectionsByType(buffers) : mockDetections;
   const alerts = live ? toLiveAlerts(buffers) : mockAlerts;
   const band = live ? toFaultWeatherBand(buffers) : mockBand;
@@ -119,7 +119,7 @@ export default function Overview() {
                   <div className="text-[11px] font-semibold uppercase tracking-wider text-haze">{s.type}</div>
                   <div className="mt-0.5 text-sm font-semibold text-ink">{s.name}</div>
                   <div className="mt-2 flex items-center justify-between">
-                    <span className="font-display text-[26px] font-semibold leading-none text-ink">
+                    <span className="tnum font-display text-[26px] font-semibold leading-none text-ink">
                       {s.temp}
                       <span className="ml-1 text-xs font-normal text-haze">°C</span>
                     </span>
@@ -129,8 +129,11 @@ export default function Overview() {
               ))}
             </div>
             <div className="mt-5">
-              <div className="mb-1 text-xs font-medium text-haze">
-                Network health · {live && selectedBuffer.length > 0 ? "recent" : "24h"}
+              <div className="mb-1 flex items-center justify-between text-xs font-medium text-haze">
+                <span>Network health</span>
+                <span className="font-mono text-[11px]">
+                  {live ? "network mean · recent" : "demo · 24h"}
+                </span>
               </div>
               <ResponsiveContainer width="100%" height={140}>
                 <AreaChart data={health} margin={{ top: 8, right: 8, bottom: 0, left: -20 }}>

@@ -17,6 +17,7 @@ const MOCK_VERDICT: Verdict = {
   title: "SENSOR FAULT",
   reason: "Isolated +15 °C spike that no neighbour shares — physically implausible rate",
   confidence: "96.4%",
+  confidenceBand: "±1.8%",
   evidence: [
     { label: "Physics", pass: true, detail: "Spike is physically possible in isolation" },
     { label: "Spatial", pass: false, detail: "Isolated — no neighbour shares it" },
@@ -24,6 +25,13 @@ const MOCK_VERDICT: Verdict = {
   ],
   healed: true,
   healedText: "Healed → 24.9 °C",
+  rootCause: {
+    type: "Sensor spike",
+    category: "Electrical Transient / Sensor Glitch",
+    note: "isolated to this station; other reporting stations normal",
+    confidence: "90%",
+    isWeather: false,
+  },
 };
 
 const MOCK_NEIGHBORS: NeighborTile[] = [

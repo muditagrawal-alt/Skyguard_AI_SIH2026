@@ -265,3 +265,22 @@ line *after* the model's weights were already randomly initialized, so "seeded" 
   a real-data background set — `benchmark/run_shap_analysis.py` → `benchmark/shap_analysis_report.md`.
 - Every flagged anomaly also carries a plain-language diagnostic explanation and is written to an
   exportable audit log (CSV) in the UI.
+
+### How the decision reaches the operator (dashboard surface)
+
+The React operator dashboard (`frontend/`) presents each packet as a fault-vs-weather **verdict**
+plus an explicit **root-cause readout**. Two points matter for interpreting what is on screen:
+
+- **Two different confidences, shown separately.** The **ensemble confidence** (this document's
+  metrics) answers *"is this anomalous?"*; the **root-cause classifier** carries its own per-rule
+  confidence answering *"is it *this specific* fault?"* — e.g. a communication dropout is asserted at
+  0.99, a calibration-drift call at 0.88. The dashboard shows both side by side and labels them, so
+  the classifier's confidence is never mistaken for the detection score, nor the reverse.
+- **Confidence is display-capped just below 100%, with a ± band.** The rendered percentage is capped
+  and annotated with a ± agreement band (the spread across the four component scores). This is a
+  presentation choice in the UI layer only — `models/ensemble.py` is unchanged and every KPI above
+  uses the raw scores. The cap exists because a live detector rendering a literal "100.0%" would
+  overstate a certainty that the numbers in §4–§5 do not support.
+
+When the backend is unreachable the dashboard shows built-in demo data behind a labelled "Demo mode"
+badge rather than fabricating a live feed — the same honesty principle applied to the interface.

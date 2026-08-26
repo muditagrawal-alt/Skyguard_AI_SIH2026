@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Card, StatusPill, StatusSpine } from "../components/primitives";
 import { mapPins as mockPins, statusColor, type Status } from "../components/data";
 import { useStream } from "../lib/StreamProvider";
-import { toMapPin } from "../lib/adapters";
+import { toMapPin, coordinatedChannels } from "../lib/adapters";
 import type { ProcessedPacket } from "../lib/types";
 
 const legend: { label: string; status: Status }[] = [
@@ -58,6 +58,18 @@ export default function MapView() {
   // wider network (its shift is coordinated → genuine weather, not a fault).
   const faultPin = pins.find((p) => p.status === "critical") ?? null;
   const weatherPin = pins.find((p) => p.status === "weather") ?? null;
+
+  // Captions derived from the pin's own packet, not fixed strings: the weather
+  // arc names the channels actually shifting; the fault caption reports the real
+  // neighbour agreement count. Offline (mock) mode keeps representative demo text.
+  const weatherPacket = weatherPin ? latestByStation[weatherPin.id] : undefined;
+  const weatherChannels =
+    live && weatherPacket ? coordinatedChannels(weatherPacket) : "Coordinated P↓ · T↓ · RH↑";
+  const faultSpatial = faultPin ? latestByStation[faultPin.id]?.spatial : undefined;
+  const faultShare =
+    live && faultSpatial && faultSpatial.other_stations_reporting > 0
+      ? `${faultSpatial.other_stations_anomalous} of ${faultSpatial.other_stations_reporting} neighbours share this signal → sensor fault.`
+      : "No neighbour shares this signal → sensor fault.";
   const avg = (ns: number[]) => (ns.length ? ns.reduce((a, b) => a + b, 0) / ns.length : 0);
   const arcNeighbours = weatherPin ? pins.filter((p) => p.id !== weatherPin.id && p.status !== "critical") : [];
   const arcTarget = weatherPin
@@ -206,7 +218,7 @@ export default function MapView() {
                   <span className="h-1.5 w-1.5 rounded-full" style={{ background: "var(--color-status-critical)" }} />
                   Isolated
                 </div>
-                <div className="mt-0.5 text-[10.5px] leading-snug text-haze">No neighbour shares this signal → sensor fault.</div>
+                <div className="mt-0.5 text-[10.5px] leading-snug text-haze">{faultShare}</div>
               </div>
             </div>
           )}
@@ -220,7 +232,7 @@ export default function MapView() {
               <div className="rounded-xl border bg-white/95 px-2.5 py-1.5 shadow-card backdrop-blur-sm" style={{ borderColor: "color-mix(in srgb, var(--color-status-weather) 40%, transparent)" }}>
                 <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide" style={{ color: "var(--color-status-weather)" }}>
                   <span className="h-1.5 w-1.5 rounded-full" style={{ background: "var(--color-status-weather)" }} />
-                  Coordinated P↓ / T↓ / RH↑
+                  {weatherChannels}
                 </div>
                 <div className="mt-0.5 text-[10.5px] leading-snug text-haze">Physically consistent across channels → genuine weather.</div>
               </div>

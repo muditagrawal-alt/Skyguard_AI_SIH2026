@@ -29,6 +29,38 @@ function round(v: number | null | undefined, digits = 0): number {
   return Math.round(v * f) / f;
 }
 
+// ── confidence display ────────────────────────────────────
+// Displayed confidence never claims absolute certainty — a calibrated detector
+// always carries residual uncertainty, so the SHOWN value is capped just under
+// 100%. This is display-only: the backend's raw confidence_score is untouched.
+const CONF_CEIL_PCT = 99.9;
+
+export function fmtConfidencePct(score01: number): string {
+  const pct = Number.isFinite(score01) ? Math.min(score01 * 100, CONF_CEIL_PCT) : 0;
+  return `${pct.toFixed(1)}%`;
+}
+
+// Compact 0–1 form for the pipeline stepper: caps at 0.99 so a saturated score
+// reads "0.99" rather than a falsely-certain "1.00".
+export function fmtConfidenceUnit(score01: number): string {
+  const v = Number.isFinite(score01) ? Math.min(score01, 0.99) : 0;
+  return v.toFixed(2);
+}
+
+// A small ± band derived honestly from how much the four detector sub-scores
+// agree: tight when they concur, wider when (e.g.) physics fires but the others
+// stay low. Clamped to a sensible 0.3–6.0% so it always reads cleanly.
+function confidenceBand(p: ProcessedPacket): string {
+  const c = p.ensemble.component_scores;
+  const vals = [c.physics, c.autoencoder, c.isolation_forest, c.statistical].filter(
+    (v): v is number => typeof v === "number" && Number.isFinite(v),
+  );
+  if (vals.length < 2) return "±2.0%";
+  const spread = Math.max(...vals) - Math.min(...vals); // 0..1
+  const band = Math.max(0.3, Math.min(6, (spread * 100) / 4));
+  return `±${band.toFixed(1)}%`;
+}
+
 function timeHMS(iso: string): string {
   const d = new Date(iso);
   return Number.isNaN(d.getTime())
@@ -258,7 +290,7 @@ export function toAuditRows(buffer: ProcessedPacket[], limit = 12): AuditRow[] {
       type: p.root_cause.fault_type,
       category: p.root_cause.fault_category,
       severity: severityWord(p.ensemble.severity, p.root_cause.is_genuine_weather),
-      confidence: `${(p.ensemble.confidence_score * 100).toFixed(1)}%`,
+      confidence: fmtConfidencePct(p.ensemble.confidence_score),
       raw: fmt(p.raw.temperature, 1),
       healed: `${fmt(p.imputed.temperature, 1)} °C`,
       explain: p.xai.explanation,
@@ -272,7 +304,7 @@ export function packetToAnomalyRow(p: ProcessedPacket): AnomalyRow {
     type: p.root_cause.fault_type,
     category: p.root_cause.fault_category,
     severity: severityWord(p.ensemble.severity, p.root_cause.is_genuine_weather),
-    confidence: `${(p.ensemble.confidence_score * 100).toFixed(1)}%`,
+    confidence: fmtConfidencePct(p.ensemble.confidence_score),
     raw: fmt(p.raw.temperature, 1),
     healed: `${fmt(p.imputed.temperature, 1)} °C`,
     state: "Open",
@@ -354,6 +386,25 @@ export function toMapPin(meta: StationMeta, latest: ProcessedPacket | null): Map
     x: coords.x,
     y: coords.y,
   };
+}
+
+// Which channels are actually shifting (and in which direction) for a pin,
+// derived from signed adaptive-baseline z-scores. Used for the map's weather
+// corroboration caption so it reflects the real reading, not a fixed phrase.
+// Falls back to a generic label when no channel shows a clear (>1σ) shift.
+export function coordinatedChannels(p: ProcessedPacket): string {
+  const z: Record<string, number> = p.statistical?.z_scores ?? {};
+  const chans: [string, string][] = [
+    ["pressure", "P"],
+    ["temperature", "T"],
+    ["humidity", "RH"],
+  ];
+  const parts = chans
+    .map(([key, short]) => ({ short, v: z[key] }))
+    .filter((c) => typeof c.v === "number" && Math.abs(c.v) >= 1)
+    .sort((a, b) => Math.abs(b.v) - Math.abs(a.v))
+    .map((c) => `${c.short}${c.v > 0 ? "↑" : "↓"}`);
+  return parts.length ? `Coordinated ${parts.join(" · ")}` : "Coordinated multi-channel shift";
 }
 
 export type LiveAlert = {
@@ -464,6 +515,37 @@ export function toNetworkHealth(buffer: ProcessedPacket[]): HealthPoint[] {
     t: timeHM(p.timestamp),
     health: round(p.sensor_health.overall_health_score, 1),
   }));
+}
+
+// Network-wide health trend: mean of every station's overall_health_score at
+// each recent time-step. Packets stream in lockstep per tick, so we align by
+// position from the newest end and average across all reporting stations.
+export function toNetworkHealthAgg(buffers: Record<string, ProcessedPacket[]>): HealthPoint[] {
+  const series = Object.values(buffers).filter((b) => b.length > 0);
+  if (series.length === 0) return [];
+  if (series.length === 1) return toNetworkHealth(series[0]);
+
+  const window = 24;
+  const depth = Math.min(window, Math.max(...series.map((b) => b.length)));
+  // Longest buffer supplies the time-axis labels.
+  const ref = series.reduce((a, b) => (b.length > a.length ? b : a), series[0]);
+
+  const out: HealthPoint[] = [];
+  for (let offset = depth - 1; offset >= 0; offset--) {
+    let sum = 0;
+    let n = 0;
+    for (const b of series) {
+      const p = b[b.length - 1 - offset];
+      if (p) {
+        sum += p.sensor_health.overall_health_score;
+        n++;
+      }
+    }
+    if (n === 0) continue;
+    const refP = ref[ref.length - 1 - offset];
+    out.push({ t: refP ? timeHM(refP.timestamp) : "", health: round(sum / n, 1) });
+  }
+  return out;
 }
 
 // ── Maintenance ───────────────────────────────────────────
@@ -581,14 +663,31 @@ export function toAnomalyKpis(buffers: Record<string, ProcessedPacket[]>): Anoma
 
 export type VerdictKind = "fault" | "weather" | "normal";
 export type VerdictEvidence = { label: string; pass: boolean; detail: string };
+
+// The multi-class root-cause diagnosis (backend/app/xai/root_cause.py). This is
+// a SEPARATE result from the ensemble's anomaly score: the ensemble answers "is
+// this anomalous, and how sure?", the classifier answers "which of the 7 fault/
+// weather classes is it, and how sure of THAT?". `confidence` here is the
+// classifier's own per-rule confidence (0.88–0.99), distinct from the ensemble
+// confidence shown in the verdict header — so both are surfaced, never conflated.
+export type RootCause = {
+  type: string; // humanized fault_type, e.g. "Sensor spike"
+  category: string; // engineering category, spatial suffix split off into `note`
+  note?: string; // parenthetical spatial context, e.g. "isolated to this station…"
+  confidence?: string; // classifier's own confidence, e.g. "90%" (absent offline)
+  isWeather: boolean;
+};
+
 export type Verdict = {
   kind: VerdictKind;
   title: string;
   reason: string;
   confidence: string;
+  confidenceBand?: string;
   evidence: VerdictEvidence[];
   healed: boolean;
   healedText: string;
+  rootCause?: RootCause;
 };
 
 const WEATHER_REASON =
@@ -609,8 +708,56 @@ function ev(label: string, pass: boolean, detail: string): VerdictEvidence {
   return { label, pass, detail };
 }
 
+// The classifier appends a parenthetical spatial note to some categories, e.g.
+// "Electrical Transient / Sensor Glitch (isolated to this station; other
+// reporting stations normal)". Split it so the core category reads cleanly and
+// the corroboration note renders as muted secondary text.
+function splitCategory(category: string): { core: string; note?: string } {
+  const m = category.match(/^(.*?)\s*\(([^)]*)\)\s*$/);
+  if (m) return { core: m[1].trim(), note: m[2].trim() };
+  return { core: category.trim() };
+}
+
+// Classifier confidence is a coarse per-rule value (0.88–0.99), not a calibrated
+// probability — shown as a plain integer %, capped under 100 for the same reason
+// the ensemble confidence is: a classifier never earns absolute certainty.
+function fmtClassifierConf(conf: number | null | undefined): string | undefined {
+  if (conf === null || conf === undefined || !Number.isFinite(conf)) return undefined;
+  const pct = Math.min(Math.max(conf, 0), 0.999) * 100;
+  return `${Math.round(pct)}%`;
+}
+
+export function toRootCause(p: ProcessedPacket): RootCause {
+  const rc = p.root_cause;
+  const { core, note } = splitCategory(rc.fault_category ?? "");
+  return {
+    type: humanize(rc.fault_type ?? ""),
+    category: core,
+    note,
+    confidence: fmtClassifierConf(rc.confidence),
+    isWeather: rc.is_genuine_weather === true,
+  };
+}
+
+// Offline equivalent from a table row. The mock rows carry a terse category and
+// only the ensemble confidence (no separate classifier confidence), so that
+// field is intentionally left undefined rather than reusing a value it isn't.
+function rootCauseFromRow(row: AnomalyRow): RootCause {
+  const { core, note } = splitCategory(row.category ?? "");
+  const isWeather = row.verdict === "weather";
+  return {
+    type: humanize(row.type ?? ""),
+    category: core || (isWeather ? "Atmospheric event" : "Sensor fault"),
+    note,
+    confidence: undefined,
+    isWeather,
+  };
+}
+
 export function toVerdict(p: ProcessedPacket): Verdict {
-  const confidence = `${(p.ensemble.confidence_score * 100).toFixed(1)}%`;
+  const confidence = fmtConfidencePct(p.ensemble.confidence_score);
+  const band = confidenceBand(p);
+  const rootCause = toRootCause(p);
   const physicsPass = !p.physics.is_physics_violation;
   const spatialPass = p.spatial.is_corroborated_event === true;
   const rateViolation =
@@ -624,6 +771,7 @@ export function toVerdict(p: ProcessedPacket): Verdict {
       title: "NORMAL",
       reason: "Reading is physically consistent and matches neighbouring stations",
       confidence,
+      confidenceBand: band,
       evidence: [
         ev("Physics", true, "Thermodynamically valid"),
         ev("Spatial", true, "Consistent with neighbours"),
@@ -631,6 +779,7 @@ export function toVerdict(p: ProcessedPacket): Verdict {
       ],
       healed: false,
       healedText: "No healing needed",
+      rootCause,
     };
   }
 
@@ -640,6 +789,7 @@ export function toVerdict(p: ProcessedPacket): Verdict {
       title: "GENUINE WEATHER",
       reason: WEATHER_REASON,
       confidence,
+      confidenceBand: band,
       evidence: [
         ev("Physics", physicsPass, physicsPass ? "Thermodynamically possible" : "Physics check flagged"),
         ev(
@@ -653,6 +803,7 @@ export function toVerdict(p: ProcessedPacket): Verdict {
       ],
       healed: false,
       healedText: "Not healed — real signal",
+      rootCause,
     };
   }
 
@@ -663,6 +814,7 @@ export function toVerdict(p: ProcessedPacket): Verdict {
     title: "SENSOR FAULT",
     reason: reasonForFault(p.root_cause.fault_type),
     confidence,
+    confidenceBand: band,
     evidence: [
       ev("Physics", physicsPass, physicsPass ? "Physically possible" : "Thermodynamically impossible"),
       ev("Spatial", spatialPass, spatialPass ? "Neighbours agree" : "Isolated — no neighbour shares it"),
@@ -674,11 +826,13 @@ export function toVerdict(p: ProcessedPacket): Verdict {
         ? "Healed (imputed)"
         : `Healed → ${healedTemp} °C`
       : "Flagged — awaiting action",
+    rootCause,
   };
 }
 
 // Offline/mock equivalent, built from a table row (no live packet available).
 export function verdictFromRow(row: AnomalyRow): Verdict {
+  const rootCause = rootCauseFromRow(row);
   if (row.verdict === "weather") {
     return {
       kind: "weather",
@@ -692,6 +846,7 @@ export function verdictFromRow(row: AnomalyRow): Verdict {
       ],
       healed: false,
       healedText: "Not healed — real signal",
+      rootCause,
     };
   }
   const t = row.type.toUpperCase();
@@ -710,6 +865,7 @@ export function verdictFromRow(row: AnomalyRow): Verdict {
     ],
     healed: actuallyHealed,
     healedText: actuallyHealed ? `Healed → ${row.healed}` : "Flagged — awaiting action",
+    rootCause,
   };
 }
 
@@ -777,7 +933,7 @@ export function toPipeline(p: ProcessedPacket): PipelineNode[] {
     ? { label: "Alert", sub: "no heal" }
     : { label: "Heal", sub: healed && healedTemp !== "—" ? `impute ${healedTemp} °C` : "quarantine" };
   return [
-    { label: "Detect", sub: p.ensemble.confidence_score.toFixed(2) },
+    { label: "Detect", sub: fmtConfidenceUnit(p.ensemble.confidence_score) },
     { label: "Classify", sub: p.root_cause.fault_type },
     { label: "Corroborate", sub: isWeather ? "neighbours agree" : "neighbours normal" },
     { label: "Decide", sub: isWeather ? "GENUINE WEATHER" : "SENSOR FAULT", emphasis: true },
@@ -814,7 +970,7 @@ export type HealProvenance = {
 };
 
 export function toHealProvenance(p: ProcessedPacket): HealProvenance {
-  const confidence = `${(p.ensemble.confidence_score * 100).toFixed(1)}%`;
+  const confidence = fmtConfidencePct(p.ensemble.confidence_score);
   const isWeather = p.root_cause.is_genuine_weather;
   const rawT = fmt(p.raw.temperature, 1);
   const rawStr = rawT === "—" ? "—" : `${rawT} °C`;

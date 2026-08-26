@@ -51,8 +51,44 @@ export function VerdictPanel({ verdict, className = "" }: { verdict: Verdict; cl
         <span className="min-w-[160px] flex-1 text-sm leading-snug text-ink">{verdict.reason}</span>
         <span className="font-mono text-sm font-semibold" style={{ color }}>
           {verdict.confidence}
+          {verdict.confidenceBand && (
+            <span className="ml-1 align-baseline text-[11px] font-normal text-haze">
+              {verdict.confidenceBand}
+            </span>
+          )}
         </span>
       </div>
+
+      {verdict.rootCause && verdict.kind !== "normal" && (
+        <div
+          className="mt-3 rounded-xl border px-3 py-2"
+          style={{
+            borderColor: `color-mix(in srgb, ${color} 30%, var(--color-mist))`,
+            background: `color-mix(in srgb, ${color} 3%, white)`,
+          }}
+        >
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-haze">
+              Root cause
+            </span>
+            {verdict.rootCause.confidence && (
+              <span className="font-mono text-[10.5px] text-haze" title="Classifier's own confidence in this fault class — separate from the ensemble detection confidence above">
+                classifier conf. {verdict.rootCause.confidence}
+              </span>
+            )}
+          </div>
+          <div className="mt-1 flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
+            <span className="text-sm font-semibold" style={{ color }}>
+              {verdict.rootCause.type}
+            </span>
+            <span className="text-xs text-haze">·</span>
+            <span className="text-xs text-ink">{verdict.rootCause.category}</span>
+          </div>
+          {verdict.rootCause.note && (
+            <div className="mt-0.5 text-[10.5px] leading-tight text-haze">{verdict.rootCause.note}</div>
+          )}
+        </div>
+      )}
 
       <div className="mt-3 grid grid-cols-3 gap-2">
         {verdict.evidence.map((e) => {
