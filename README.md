@@ -282,4 +282,5 @@ void loop() {
 - [ESP32 & Microcontroller Flashing Guide](docs/ESP32_DEPLOYMENT.md)
 - [React Operator Dashboard — Run & Wiring Guide](frontend/RUN.md)
 - [SIH 2026 Demo Script & Talking Points](docs/DEMO_SCRIPT.md)
+- [Prior Art & Validation Positioning](docs/PRIOR_ART.md)
 - [Benchmark Evaluation Report](benchmark/evaluation_report.md)

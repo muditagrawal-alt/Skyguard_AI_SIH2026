@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  # FastAPI Backend (REST + WebSockets)
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: skyguard_backend
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+
+  # React Operator Dashboard (Vite + TypeScript)
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    container_name: skyguard_frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
