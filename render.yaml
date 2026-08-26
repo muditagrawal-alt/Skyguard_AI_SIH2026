@@ -6,6 +6,9 @@ services:
     dockerfilePath: ./Dockerfile
     healthCheckPath: /
     autoDeploy: true
+    envVars:
+      - key: PORT
+        value: 8000
 
   # 2. React Operator Dashboard (Static Site)
   - type: web
