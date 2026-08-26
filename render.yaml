@@ -1,15 +1,13 @@
 services:
-  # 1. FastAPI Backend (REST + WebSockets)
+  # 1. FastAPI Backend (Docker Web Service)
   - type: web
     name: skyguard-backend
-    env: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT
-    envVars:
-      - key: PYTHON_VERSION
-        value: 3.10.12
+    env: docker
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /
+    autoDeploy: true
 
-  # 2. React Operator Dashboard (Vite + TypeScript)
+  # 2. React Operator Dashboard (Static Site)
   - type: web
     name: skyguard-frontend
     env: static
