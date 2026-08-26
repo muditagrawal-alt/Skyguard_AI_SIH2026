@@ -35,7 +35,7 @@ pnpm install
 pnpm dev
 ```
 
-Open **http://localhost:8443**. The dev server proxies `/api` and `/ws` to the
+Open **http://localhost:5173**. The dev server proxies `/api` and `/ws` to the
 backend at `http://localhost:8000`.
 
 ### Pointing at a backend on another host/port
